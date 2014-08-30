@@ -156,12 +156,18 @@ class Compiler
         color = 'red'
 
       r.graphName = name
-      node = g.addNode name, {color}
+      node = g.addNode name, {shape:'box', color}
+
+    for s,sid in @shuttles
+      g.addNode "S#{sid}", {shape:'oval', style:'filled', fillcolor:'plum1'}
 
     for r,rid in @regions when numKeys r.connections
       for k,c of r.connections when c.r > rid
         edge = g.addEdge r.graphName, @regions[c.r].graphName
         edge.set 'label', "S#{c.shuttle} s#{c.state}"
+
+      for d in r.dependants
+        g.addEdge r.graphName, "S#{d}"
 
     console.log g.to_dot()
     g.output 'svg', "#{filename}.svg"
@@ -372,16 +378,16 @@ class Compiler
       for e in r.tempEdges
         {x,y,sid,f} = e
         s = @shuttles[sid]
-        console.log "temp edge at region #{rid} shuttle #{sid} (#{x},#{y}) force #{JSON.stringify f}"
+        #console.log "temp edge at region #{rid} shuttle #{sid} (#{x},#{y}) force #{JSON.stringify f}"
         #@printPoint x, y
 
         for state,stateid in s.states
           filledStates = s.fill["#{x},#{y}"]
           #console.log filledStates
-          console.log "looking inside for state #{stateid}"
+          #console.log "looking inside for state #{stateid}"
           push = (state.pushedBy[rid] ||= {mx:0,my:0})
 
-          console.log 's', stateid, filledStates
+          #console.log 's', stateid, filledStates
           if !filledStates || !filledStates[stateid]
             fill e, (x, y, hmm) =>
               k = "#{x},#{y}"
@@ -411,12 +417,12 @@ class Compiler
                 # If this shuttle fills the adjacent state, add a force multiplier.
                 #console.log "#{x+fx},#{y+fy}", s.fill["#{x+fx},#{y+fy}"]
                 if s.fill["#{x+dx},#{y+dy}"]?[stateid]
-                  push.mx += f.dx
-                  push.my += f.dy
+                  push.mx += dx
+                  push.my += dy
 
               yes
           else
-            console.log 'state filled', x, y, rid, stateid
+            #console.log 'state filled', x, y, rid, stateid, f
             #@printPoint x, y
             # Record the force from the touch.
             push.mx += f.dx
@@ -424,21 +430,30 @@ class Compiler
 
       delete r.tempEdges
 
+      ###
       if numKeys(r.connections)
         console.log "#{rid}:"
         console.log JSON.stringify r, null, 2
+      ###
 
+    #console.log JSON.stringify @shuttles, null, 2
 
     # Now simplify the shuttles a little. Hoist pushedBy 
     for shuttle in @shuttles
       for rid, {mx,my} of shuttle.states[0].pushedBy
         shared = yes
-        for state in shuttle.states[1...]
-          shared = no if shuttle.moves.x && state.pushedBy[rid].mx != mx
-          shared = no if shuttle.moves.y && state.pushedBy[rid].my != my
 
-          delete state.pushedBy[rid].mx if !shuttle.moves.x
-          delete state.pushedBy[rid].my if !shuttle.moves.y
+        for state,stateid in shuttle.states
+          push = state.pushedBy[rid]
+
+          if stateid >= 1
+            shared = no if shuttle.moves.x && push.mx != mx
+            shared = no if shuttle.moves.y && push.my != my
+
+          delete push.mx if !shuttle.moves.x
+          delete push.my if !shuttle.moves.y
+
+          delete state.pushedBy[rid] if !push.mx && !push.my
 
         if shared
           pushed = {}
@@ -454,13 +469,29 @@ class Compiler
 
     console.log JSON.stringify @shuttles, null, 2
 
+    for region in @regions
+      region.pressure = 0
+      region.pressure += v for k,v of region.engines
+      region.dependants = []
+
+    for s,sid in @shuttles
+      for k of s.pushedBy
+        @regions[+k].dependants.push sid
+
+      for state in s.states
+        for k of state.pushedBy
+          @regions[+k].dependants.push sid
+
     @drawRegionGraph "out.dot"
 
 
-    for y in [@top..@bottom]
-      for x in [@left..@right]
-        process.stdout.write "#{@shuttleGrid[[x,y]] ? @engineGrid[[x,y]] ? '.'}"
-      process.stdout.write '\n'
+
+    for region in @regions
+      # Flood fill to find engines
+
+      #for k,c of region.connections
+
+      console.log region
 
     return
 
@@ -468,9 +499,9 @@ class Compiler
 #filename = 'almostEmpty.json'
 #filename = 'and-or2.json'
 #filename = 'cpu.json'
-#filename = 'oscillator.json'
+filename = 'oscillator.json'
 #filename = 'fork.json'
-filename = '4spin.json'
+#filename = '4spin.json'
 #filename = 'test.json'
 
 
