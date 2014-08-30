@@ -29,10 +29,10 @@ fill = (initial_square, f) ->
 
 
 edges = [
-  {dx:0,dy:0,isTop:false,fx:-1,fy:0}
-  {dx:0,dy:0,isTop:true,fx:0,fy:-1}
-  {dx:1,dy:0,isTop:false,fx:1,fy:0}
-  {dx:0,dy:1,isTop:true,fx:0,fy:1}
+  {ex:0,ey:0,isTop:false,dx:-1,dy:0}
+  {ex:0,ey:0,isTop:true,dx:0,dy:-1}
+  {ex:1,ey:0,isTop:false,dx:1,dy:0}
+  {ex:0,ey:1,isTop:true,dx:0,dy:1}
 ]
  
 chars =
@@ -43,8 +43,6 @@ chars =
   shuttle: 'S'
   thinshuttle: 's'
   bridge: 'b'
-
-
 
 fill2 = (p, initial_data, queue, f) ->
   visited = {}
@@ -166,7 +164,7 @@ class Compiler
         edge.set 'label', "S#{c.shuttle} s#{c.state}"
 
     console.log g.to_dot()
-    g.output 'png', "#{filename}.png"
+    g.output 'svg', "#{filename}.svg"
     
 
   #id: -> nextId++
@@ -351,8 +349,19 @@ class Compiler
 
       # This will happen for all tiles which aren't engines and aren't in shuttle zones
       # (so, engines, empty space, grills and bridges)
-      for {dx,dy,isTop} in edges
-        @makeRegionAt x+dx, y+dy, isTop
+
+      letsAirThrough =
+        nothing: yes
+        thinsolid: yes
+        bridge: yes
+        thinshuttle: yes
+
+      # We'll skip making regions when the region is between two engines, or an
+      # engine and a wall or something.
+      @makeRegionAt(x+ex, y+ey, isTop) for {ex,ey,isTop,dx,dy} in edges when (
+          letsAirThrough[v] ||
+          letsAirThrough[@get(x+dx, y+dy)] ||
+          @shuttleGrid["#{x+dx},#{y+dy}"] != undefined)
 
     @print()
     @printEdges()
@@ -364,7 +373,7 @@ class Compiler
         {x,y,sid,f} = e
         s = @shuttles[sid]
         console.log "temp edge at region #{rid} shuttle #{sid} (#{x},#{y}) force #{JSON.stringify f}"
-        @printPoint x, y
+        #@printPoint x, y
 
         for state,stateid in s.states
           filledStates = s.fill["#{x},#{y}"]
@@ -388,8 +397,8 @@ class Compiler
 
               # Look for connections to other regions. Also figure out if this
               # pressure pushes us.
-              for {dx,dy,isTop,fx,fy} in edges
-                rid2 = @edgeGrid["#{x+dx},#{y+dy},#{isTop}"]
+              for {ex,ey,isTop,dx,dy} in edges
+                rid2 = @edgeGrid["#{x+ex},#{y+ey},#{isTop}"]
                 if rid2 != undefined && rid2 != rid && rid2 > rid
                   # Victory
                   console.log "region #{rid} touches #{rid2} in shuttle #{sid} state #{stateid}"
@@ -401,7 +410,7 @@ class Compiler
 
                 # If this shuttle fills the adjacent state, add a force multiplier.
                 #console.log "#{x+fx},#{y+fy}", s.fill["#{x+fx},#{y+fy}"]
-                if s.fill["#{x+fx},#{y+fy}"]?[stateid]
+                if s.fill["#{x+dx},#{y+dy}"]?[stateid]
                   push.mx += f.dx
                   push.my += f.dy
 
