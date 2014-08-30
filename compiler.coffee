@@ -2,7 +2,12 @@ util = require 'util'
 
 Heap = require 'heap'
 
-cardinal_dirs = [[0,1],[0,-1],[1,0],[-1,0]]
+
+dirs =
+  up: {dx:0,dy:-1}
+  right: {dx:1,dy:0}
+  down: {dx:0,dy:1}
+  left: {dx:-1,dy:0}
 
 fill = (initial_square, f) ->
   visited = {}
@@ -24,10 +29,10 @@ fill = (initial_square, f) ->
 
 
 edges = [
-  {dx:0,dy:0,isTop:false}
-  {dx:0,dy:0,isTop:true}
-  {dx:1,dy:0,isTop:false}
-  {dx:0,dy:1,isTop:true}
+  {dx:0,dy:0,isTop:false,fx:-1,fy:0}
+  {dx:0,dy:0,isTop:true,fx:0,fy:-1}
+  {dx:1,dy:0,isTop:false,fx:1,fy:0}
+  {dx:0,dy:1,isTop:true,fx:0,fy:1}
 ]
  
 chars =
@@ -103,6 +108,22 @@ class Compiler
         process.stdout.write chars[@get x, y] || ';'
       process.stdout.write '\n'
 
+
+  printPoint: (px, py)->
+    #console.log top, right, left, bottom
+   
+    for y in [@top-1..@bottom+1]
+      process.stdout.write ''
+      for x in [@left-1..@right+1]
+        process.stdout.write(
+          if x == px and y == py
+            '%'
+          else
+            chars[@get x, y] || ';'
+        )
+      process.stdout.write '\n'
+
+
   printEdges: ->
     for y in [@top..@bottom+1]
       # tops
@@ -145,7 +166,7 @@ class Compiler
         edge.set 'label', "S#{c.shuttle} s#{c.state}"
 
     console.log g.to_dot()
-    g.output 'svg', "#{filename}.svg"
+    g.output 'png', "#{filename}.png"
     
 
   #id: -> nextId++
@@ -180,22 +201,36 @@ class Compiler
       {x,y,isTop} = n
       #console.log 'expanding', x, y, isTop
 
+      # We need to check for connectivity via the two adjoining grid cells.
+      #
+      # We need:
+      # - x,y of the cell to check
+      # - ox,oy is the opposite edge via that cell for when we're calculating
+      # bridges.
+      # - If we hit a shuttle, we need to know which way the force pushes
       check = if isTop
-        [{x, y:y-1, ox:x, oy:y-1}, {x, y, ox:x, oy:y+1}]
+        # Above, below
+        [{x, y:y-1, ox:x, oy:y-1, f:dirs.up}, {x, y, ox:x, oy:y+1, f:dirs.down}]
       else
-        [{x:x-1, y, ox:x-1, oy:y}, {x, y, ox:x+1, oy:y}]
+        # Left, right
+        [{x:x-1, y, ox:x-1, oy:y, f:dirs.left}, {x, y, ox:x+1, oy:y, f:dirs.right}]
 
-      for {x,y,ox,oy}, i in check
+      for {x,y,ox,oy,f}, i in check
         k = "#{x},#{y}"
         continue if visited[k]
         visited[k] = true
-        a = @annotatedGrid[k]
+        sid = @shuttleGrid[k]
         v = @grid[k]
 
-        if v not in ['positive','negative'] and a != undefined
+        #console.log 'flood filling', id, x, y, f
+        #@printPoint x, y
+
+        if sid != undefined
+          #console.log 'adding temp edge', x, y, a, f
+          #console.log '\n'
           # This is the boundary with a shuttle. Mark it - we'll come back in
           # the next pass.
-          r.tempEdges.push {x,y,a}
+          r.tempEdges.push {x,y,sid,f}
           continue
 
         #console.log 'v', x, y, v
@@ -211,14 +246,16 @@ class Compiler
             hmm x, y+1, true
             hmm x+1, y, false
           when 'positive', 'negative'
-            r.engines[@annotatedGrid["#{x},#{y}"]] = if v is 'positive' then 1 else -1
+            r.engines[@engineGrid["#{x},#{y}"]] = if v is 'positive' then 1 else -1
 
     r
 
   compile: ->
     @print()
-    # map from grid position -> ID of thing
-    @annotatedGrid = {}
+    # map from grid position -> ID of shuttle
+    @shuttleGrid = {}
+    # map from grid position -> ID of engine
+    @engineGrid = {}
 
     @shuttles = []
     @engines = []
@@ -235,31 +272,32 @@ class Compiler
           # Mark these - we'll need them later.
           id = @engines.length
           @engines.push {x,y}
-          @annotatedGrid["#{x},#{y}"] = id
+          @engineGrid["#{x},#{y}"] = id
 
         when 'shuttle', 'thinshuttle'
           # flood fill the shuttle extents.
-          continue if @annotatedGrid["#{x},#{y}"]?
+          continue if @shuttleGrid["#{x},#{y}"]?
 
-          immobile = v is 'thinshuttle'
           id = @shuttles.length
           @shuttles.push s =
             points: [] # List of points in the shuttle in the base state
             fill: {} # Map from x,y -> [true if filled in state=index]
-            states: [] # List of the {dx,dy} of each state
+            states: [] # List of the {dx,dy,pushedBy} of each state
             adjacentTo: {} # Map from {x,y} -> [region id]
+            moves: {x:false, y:false}
+            immobile: v is 'thinshuttle' # Immobile if only thinshuttle, no states or no pressure possible.
+            pushedBy: {} # Map from rid -> force across all states
 
           # Flood fill the shuttle
           fill {x,y}, (x, y) =>
             if @get(x, y) in ['shuttle', 'thinshuttle']
-              immobile = false if immobile && @get(x,y) is 'shuttle'
+              s.immobile = false if s.immobile && @get(x,y) is 'shuttle'
 
-              @annotatedGrid["#{x},#{y}"] = id
+              @shuttleGrid["#{x},#{y}"] = id
               s.points.push {x,y}
               true
             else
               false
-          s.immobile = immobile
 
     # For each shuttle, figure out where it can move to.
     for s,id in @shuttles when !s.immobile
@@ -275,16 +313,20 @@ class Compiler
             return false
   
         state = numStates++
-        s.states.push {dx, dy}
+        s.states.push {dx, dy, pushedBy:{}} # pushedBy is a map from rid -> {mx,my} multipliers
+
+        s.moves.x = true if dx
+        s.moves.y = true if dy
+
         # Ok, this state is legit. Mark the filled cells as impassable in this
         # state.
         for {x,y} in s.points when @get(x, y) is 'shuttle'
           _x = x+dx; _y = y+dy
-          currentAnnotation = @annotatedGrid[[_x, _y]]
-          if currentAnnotation? and currentAnnotation != id
+          currentShuttle = @shuttleGrid[[_x, _y]]
+          if currentShuttle? and currentShuttle != id
             throw Error 'Potentially overlapping shuttles'
 
-          @annotatedGrid[[_x, _y]] = id
+          @shuttleGrid[[_x, _y]] = id
 
           f = (s.fill[[_x, _y]] ?= [])
           f[state] = true
@@ -304,8 +346,8 @@ class Compiler
     for k,v of @grid when k not in ['tw', 'th']
       {x,y} = parseXY k
 
-      id = @annotatedGrid[k]
-      continue if id isnt undefined and v not in ['positive', 'negative']
+      sid = @shuttleGrid[k]
+      continue if sid isnt undefined
 
       # This will happen for all tiles which aren't engines and aren't in shuttle zones
       # (so, engines, empty space, grills and bridges)
@@ -319,42 +361,87 @@ class Compiler
     # Now go through all the regions and figure out the connectivity
     for r,rid in @regions
       for e in r.tempEdges
-        {x,y,a} = e
-        s = @shuttles[a]
-        #console.log x,y,s
-        filledStates = s.fill["#{x},#{y}"]
-        #console.log filledStates
+        {x,y,sid,f} = e
+        s = @shuttles[sid]
+        console.log "temp edge at region #{rid} shuttle #{sid} (#{x},#{y}) force #{JSON.stringify f}"
+        @printPoint x, y
 
-        for state in [0...s.numStates] when !filledStates || !filledStates[state]
-          fill e, (x, y, hmm) =>
-            k = "#{x},#{y}"
-            return no if @annotatedGrid[k] != a
+        for state,stateid in s.states
+          filledStates = s.fill["#{x},#{y}"]
+          #console.log filledStates
+          console.log "looking inside for state #{stateid}"
+          push = (state.pushedBy[rid] ||= {mx:0,my:0})
 
-            filledStates = s.fill[k]
-            return no if filledStates && filledStates[state]
+          console.log 's', stateid, filledStates
+          if !filledStates || !filledStates[stateid]
+            fill e, (x, y, hmm) =>
+              k = "#{x},#{y}"
+              return no if @shuttleGrid[k] != sid
 
-            adjList = (s.adjacentTo["#{x},#{y}"] ||= [])
-            adjList[state] ?= rid
+              filledStates = s.fill[k]
+              return no if filledStates && filledStates[stateid]
 
-            # Look for connections to other regions
-            for {dx,dy,isTop} in edges
-              rid2 = @edgeGrid["#{x+dx},#{y+dy},#{isTop}"]
-              if rid2 != undefined && rid2 != rid && rid2 > rid
-                # Victory
-                console.log "region #{rid} touches #{rid2} in shuttle #{a} state #{state}"
+              # Mark that this cell is adjacent to the region in this state.
+              # This is a helper for when we render the pressure.
+              adjList = (s.adjacentTo["#{x},#{y}"] ||= [])
+              adjList[stateid] ?= rid
 
-                r2 = @regions[rid2]
-                # No idea what the most convenient representation of this data is yet.
-                r.connections[[rid2,a,state]] = {r:rid2, shuttle:a, state}
-                r2.connections[[rid,a,state]] = {r:rid, shuttle:a, state}
+              # Look for connections to other regions. Also figure out if this
+              # pressure pushes us.
+              for {dx,dy,isTop,fx,fy} in edges
+                rid2 = @edgeGrid["#{x+dx},#{y+dy},#{isTop}"]
+                if rid2 != undefined && rid2 != rid && rid2 > rid
+                  # Victory
+                  console.log "region #{rid} touches #{rid2} in shuttle #{sid} state #{stateid}"
 
-            yes
+                  r2 = @regions[rid2]
+                  # No idea what the most convenient representation of this data is yet.
+                  r.connections[[rid2,sid,stateid]] = {r:rid2, shuttle:sid, state:stateid}
+                  r2.connections[[rid,sid,stateid]] = {r:rid, shuttle:sid, state:stateid}
+
+                # If this shuttle fills the adjacent state, add a force multiplier.
+                #console.log "#{x+fx},#{y+fy}", s.fill["#{x+fx},#{y+fy}"]
+                if s.fill["#{x+fx},#{y+fy}"]?[stateid]
+                  push.mx += f.dx
+                  push.my += f.dy
+
+              yes
+          else
+            console.log 'state filled', x, y, rid, stateid
+            #@printPoint x, y
+            # Record the force from the touch.
+            push.mx += f.dx
+            push.my += f.dy
 
       delete r.tempEdges
 
       if numKeys(r.connections)
         console.log "#{rid}:"
         console.log JSON.stringify r, null, 2
+
+
+    # Now simplify the shuttles a little. Hoist pushedBy 
+    for shuttle in @shuttles
+      for rid, {mx,my} of shuttle.states[0].pushedBy
+        shared = yes
+        for state in shuttle.states[1...]
+          shared = no if shuttle.moves.x && state.pushedBy[rid].mx != mx
+          shared = no if shuttle.moves.y && state.pushedBy[rid].my != my
+
+          delete state.pushedBy[rid].mx if !shuttle.moves.x
+          delete state.pushedBy[rid].my if !shuttle.moves.y
+
+        if shared
+          pushed = {}
+          pushed.mx = mx if shuttle.moves.x
+          pushed.my = my if shuttle.moves.y
+
+          if pushed.mx || pushed.my
+            shuttle.pushedBy[rid] = pushed
+
+          for state in shuttle.states
+            delete state.pushedBy[rid]
+
 
     console.log JSON.stringify @shuttles, null, 2
 
@@ -363,7 +450,7 @@ class Compiler
 
     for y in [@top..@bottom]
       for x in [@left..@right]
-        process.stdout.write "#{@annotatedGrid[[x,y]] ? '.'}"
+        process.stdout.write "#{@shuttleGrid[[x,y]] ? @engineGrid[[x,y]] ? '.'}"
       process.stdout.write '\n'
 
     return
@@ -500,9 +587,11 @@ class Compiler
 
 #filename = 'almostEmpty.json'
 #filename = 'and-or2.json'
-filename = 'cpu.json'
+#filename = 'cpu.json'
 #filename = 'oscillator.json'
 #filename = 'fork.json'
+filename = '4spin.json'
+#filename = 'test.json'
 
 
 
