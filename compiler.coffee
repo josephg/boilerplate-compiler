@@ -162,9 +162,9 @@ class Compiler
       g.addNode "S#{sid}", {shape:'oval', style:'filled', fillcolor:'plum1'}
 
     for r,rid in @regions when numKeys r.connections
-      for k,c of r.connections when c.r > rid
-        edge = g.addEdge r.graphName, @regions[c.r].graphName
-        edge.set 'label', "S#{c.shuttle} s#{c.state}"
+      for k,c of r.connections when c.rid > rid
+        edge = g.addEdge r.graphName, @regions[c.rid].graphName
+        edge.set 'label', "S#{c.sid} s#{c.stateid}"
 
       for d in r.dependants
         g.addEdge r.graphName, "S#{d}"
@@ -411,8 +411,8 @@ class Compiler
 
                   r2 = @regions[rid2]
                   # No idea what the most convenient representation of this data is yet.
-                  r.connections[[rid2,sid,stateid]] = {r:rid2, shuttle:sid, state:stateid}
-                  r2.connections[[rid,sid,stateid]] = {r:rid, shuttle:sid, state:stateid}
+                  r.connections[[rid2,sid,stateid]] = {rid:rid2, sid, stateid}
+                  r2.connections[[rid,sid,stateid]] = {rid:rid, sid, stateid}
 
                 # If this shuttle fills the adjacent state, add a force multiplier.
                 #console.log "#{x+fx},#{y+fy}", s.fill["#{x+fx},#{y+fy}"]
@@ -430,11 +430,9 @@ class Compiler
 
       delete r.tempEdges
 
-      ###
-      if numKeys(r.connections)
-        console.log "#{rid}:"
-        console.log JSON.stringify r, null, 2
-      ###
+      #if numKeys(r.connections)
+      #  console.log "#{rid}:"
+      #  console.log JSON.stringify r, null, 2
 
     #console.log JSON.stringify @shuttles, null, 2
 
@@ -469,6 +467,51 @@ class Compiler
 
     console.log JSON.stringify @shuttles, null, 2
 
+  
+
+
+    for region, rid in @regions
+      # Flood fill to find engines
+
+      expand = (trace, region) =>
+        for eid, pressure of region.engines
+          console.log 'found engine!', trace.path, trace.shuttleState, eid, pressure
+          trace.base.clauses++
+
+        for k,{rid,sid,stateid} of region.connections
+          continue if rid in trace.path
+
+          currentState = trace.shuttleState[sid]
+
+          if currentState == undefined
+            set = true
+            trace.shuttleState[sid] = stateid
+          else if currentState != stateid
+            # States are mutually exclusive
+            continue
+          else
+            set = false
+
+          trace.path.push rid
+
+          expand trace, @regions[rid]
+
+          trace.path.pop()
+          delete trace.shuttleState[sid] if set
+
+      console.log 'expanding region', rid, region
+      region.clauses = 0
+      expand {base:region, path:[rid], shuttleState:{}}, region
+
+      console.log "#{region.clauses} or clauses" if region.clauses
+
+
+
+
+
+
+    
+
     for region in @regions
       region.pressure = 0
       region.pressure += v for k,v of region.engines
@@ -483,16 +526,6 @@ class Compiler
           @regions[+k].dependants.push sid
 
     @drawRegionGraph "out.dot"
-
-
-
-    for region in @regions
-      # Flood fill to find engines
-
-      #for k,c of region.connections
-
-      console.log region
-
     return
 
 
