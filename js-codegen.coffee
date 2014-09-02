@@ -172,46 +172,50 @@ function step() {
       multExpr = if mult is 1 then '+' else if mult is -1 then '-' else "+ #{mult}*"
       "#{multExpr} #{pressureExpr(rid)}"
 
+    writeForceExpr = (pushedBy, shouldAdd) ->
+      W "  force #{if shouldAdd then '+=' else '='}"
+      for p in pushedBy
+        rid = p.rid
+        mult = p["m#{d}"]
+        continue unless mult
+        W "    #{forceExpr mult, rid}"
+      W "    ;"
+
     # Update the state of all shuttles
     W "  var force;"
     for s,sid in shuttles when !s.immobile
+      #console.log s.pushedBy
       for d in ['x', 'y'] when s.moves[d]
-        printedForceExpr = no
-        for rid, m of s.pushedBy
-          mult = m["m#{d}"]
-          continue unless mult
+        W "\n  // Calculating #{d} force for shuttle #{sid}"
+        writeForceExpr s.pushedBy if s.pushedBy.length
 
-          if !printedForceExpr
-            W "  force ="
-            printedForceExpr = yes
-          W "    #{forceExpr mult, rid}"
+        numStatesWithPush = 0
+        numStatesWithPush++ for state in s.states when state.pushedBy.length
 
-        if printedForceExpr
-          W "    ;"
-
-        printedSwitchHeader = no
-        for state,stateid in s.states
-          printedCaseHeader = no
-          for rid, m of state.pushedBy
-            mult = m["m#{d}"]
-            continue unless mult
-            if !printedSwitchHeader
-              W "  switch(shuttleState[#{sid}]) {"
-              printedSwitchHeader = yes
-
-            if !printedCaseHeader
-              W "    case #{stateid}:"
-              W "      force #{if printedForceExpr then '+' else ''}="
-              printedCaseHeader = yes
-
-            W "        #{forceExpr mult, rid}"
-          if printedCaseHeader
-            W "      ;"
+        if numStatesWithPush == 1
+          # Emit an if block
+          for state,stateid in s.states when state.pushedBy.length
+            #console.log state.pushedBy
+            W "  if (shuttleState[#{sid}] == #{stateid}) {"
+            writeForceExpr state.pushedBy, s.pushedBy.length > 0
+            W "  }"
+            if !s.pushedBy.length
+              W "  else force = 0;"
+        else if numStatesWithPush > 1
+          # Emit a switch
+          W "  switch(shuttleState[#{sid}]) {"
+          for state,stateid in s.states when state.pushedBy.length
+            W "    case #{stateid}:"
+            writeForceExpr state.pushedBy, s.pushedBy.length > 0
             W "      break;"
-        if printedSwitchHeader
+
+          if !s.pushedBy.length
+            W "    default: force = 0;"
           W "  }"
 
+        W "  if (force) {"
 
+        W "  }"
 
 
 

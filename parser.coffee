@@ -59,7 +59,7 @@ class Parser
     @findRegionConnectionsAndShuttleForce()
 
     # Trim pushedBy values in shuttles
-    @optimizeShuttlePush()
+    @cleanShuttlePush()
 
     # Figure out which engines (if any) are important in by multiple regions.
     @calculateEngineExclusivity e for e in @engines
@@ -91,7 +91,7 @@ class Parser
             adjacentTo: {} # Map from {x,y} -> [region id]
             moves: {x:false, y:false}
             immobile: v is 'thinshuttle' # Immobile if only thinshuttle, no states or no pressure possible.
-            pushedBy: {} # Map from rid -> force across all states
+            pushedBy: [] # List of {rid, mx, my} across all states
 
           # Flood fill the shuttle
           fill {x,y}, (x, y) =>
@@ -119,7 +119,8 @@ class Parser
             return false
   
         state = numStates++
-        s.states.push {dx, dy, pushedBy:{}} # pushedBy is a map from rid -> {mx,my} multipliers
+        # pushedBy is a list of {rid,mx,my} multipliers
+        s.states.push {dx, dy, pushedBy:[], tempPushedBy:{}}
 
         s.moves.x = true if dx
         s.moves.y = true if dy
@@ -276,10 +277,16 @@ class Parser
           filledStates = s.fill["#{x},#{y}"]
           #console.log filledStates
           #console.log "looking inside for state #{stateid}"
-          push = (state.pushedBy[rid] ||= {mx:0,my:0})
+          push = (state.tempPushedBy[rid] ||= {mx:0,my:0})
 
           #console.log 's', stateid, filledStates
-          if !filledStates || !filledStates[stateid]
+          if filledStates && filledStates[stateid]
+            #@printPoint x, y
+            
+            # Record the force from the touch.
+            push.mx += f.dx
+            push.my += f.dy
+          else
             fill e, (x, y, hmm) =>
               k = "#{x},#{y}"
               return no if @shuttleGrid[k] != sid
@@ -312,46 +319,48 @@ class Parser
                   push.my += dy
 
               yes
-          else
-            #console.log 'state filled', x, y, rid, stateid, f
-            #@printPoint x, y
-            # Record the force from the touch.
-            push.mx += f.dx
-            push.my += f.dy
 
       delete r.tempEdges
 
 
-  optimizeShuttlePush: ->
-    # Hoist pushedBy.{mx, my} to the shuttle itself if the state doesn't
-    # matter. Also remove push markers if the force is 0 or the shuttle pulls
-    # in the wrong direction
+  cleanShuttlePush: ->
+    # Rewrite shuttle.states[x].tempPushedBy map to shuttle.pushedBy list and
+    # shuttle.states[x].pushedBy list.
     for shuttle in @shuttles
-      for rid, {mx,my} of shuttle.states[0].pushedBy
+      {x:movesx, y:movesy} = shuttle.moves
+      for rid, {mx,my} of shuttle.states[0].tempPushedBy when (mx && movesx) || (my && movesy)
         shared = yes
 
-        for state,stateid in shuttle.states
-          push = state.pushedBy[rid]
-
-          if stateid >= 1
-            shared = no if shuttle.moves.x && push.mx != mx
-            shared = no if shuttle.moves.y && push.my != my
-
-          delete push.mx if !shuttle.moves.x
-          delete push.my if !shuttle.moves.y
-
-          delete state.pushedBy[rid] if !push.mx && !push.my
+        for state,stateid in shuttle.states[1...] when shared
+          push = state.tempPushedBy[rid]
+          
+          if push
+            shared = no if movesx && push.mx != mx
+            shared = no if movesy && push.my != my
+          else
+            shared = no
 
         if shared
-          pushed = {}
-          pushed.mx = mx if shuttle.moves.x
-          pushed.my = my if shuttle.moves.y
+          pushed = {rid:+rid}
+          pushed.mx = mx if movesx
+          pushed.my = my if movesy
 
-          if pushed.mx || pushed.my
-            shuttle.pushedBy[rid] = pushed
+          shuttle.pushedBy.push pushed
 
           for state in shuttle.states
-            delete state.pushedBy[rid]
+            delete state.tempPushedBy[rid]
+
+      # Anything that wasn't shared gets pushed into the state's pushed list.
+      for state in shuttle.states
+        for rid, {mx, my} of state.tempPushedBy
+          pushed = {rid:+rid}
+          pushed.mx = mx if movesx
+          pushed.my = my if movesy
+
+          if pushed.mx || pushed.my
+            state.pushedBy.push pushed
+
+        delete state.tempPushedBy
 
 
   calculateEngineExclusivity: (e) ->
@@ -417,5 +426,5 @@ filename = 'exclusive.json'
 if require.main == module
   {shuttles, regions} = parseFile filename, debug:true
 
-  #console.log shuttles
+  #console.log s.pushedBy, s.states for s in shuttles
 
