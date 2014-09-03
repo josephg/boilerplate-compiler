@@ -1,4 +1,4 @@
-{parseXY, numKeys, fill, fillRegions, gridExtents, printGrid, printPoint, printEdges} = require './util'
+{parseXY, numKeys, fill, fillRegions, gridExtents, printGrid, printEdges} = util = require './util'
 
 dirs =
   up: {dx:0,dy:-1}
@@ -38,6 +38,10 @@ class Parser
 
   # **** Helper functions
   get: (x,y) -> @grid["#{x},#{y}"]
+
+  printPoint: (x, y) ->
+    @extents ||= gridExtents @grid
+    util.printPoint @extents, @grid, x, y
 
   parse: (@opts = {}) ->
     # For now.
@@ -323,6 +327,7 @@ class Parser
       for e in r.tempEdges
         {x,y,sid,f} = e
         s = @shuttles[sid]
+
         #console.log "temp edge at region #{rid} shuttle #{sid} (#{x},#{y}) force #{JSON.stringify f}"
         #@printPoint x, y
 
@@ -347,16 +352,29 @@ class Parser
               filledStates = s.fill[k]
               return no if filledStates && filledStates[stateid]
 
+              #console.log "exploring #{x},#{y}"
+              #@printPoint x, y
+
               # Mark that this cell is adjacent to the region in this state.
-              # This is a helper for when we render the pressure.
+
+              # This is used for a couple of things:
+              # - When we render the pressure, we need to know which region's
+              #   pressure to use in this cell
+              # - If multiple regions connect through a cell in a state,
+              #   they'll all share the same pressure value. We only want to
+              #   push the shuttle once, and we only need to add the regions'
+              #   connections once.
               adjList = (s.adjacentTo["#{x},#{y}"] ||= [])
-              adjList[stateid] ?= rid
+              if adjList[stateid]?
+                return no
+
+              adjList[stateid] = rid
 
               # Look for connections to other regions. Also figure out if this
               # pressure pushes us.
               for {ex,ey,isTop,dx,dy} in edges
                 rid2 = @edgeGrid["#{x+ex},#{y+ey},#{isTop}"]
-                if rid2 != undefined && rid2 != rid && rid2 > rid
+                if rid2 != undefined && rid2 != rid # && rid2 > rid
                   # Victory
                   #console.log "region #{rid} touches #{rid2} in shuttle #{sid} state #{stateid}"
 
@@ -368,6 +386,7 @@ class Parser
                 # If this shuttle fills the adjacent state, add a force multiplier.
                 #console.log "#{x+fx},#{y+fy}", s.fill["#{x+fx},#{y+fy}"]
                 if s.fill["#{x+dx},#{y+dy}"]?[stateid]
+                  #console.log 'push', x, y, {dx, dy}
                   push.mx += dx
                   push.my += dy
 
@@ -485,7 +504,14 @@ filename = 'and-or2.json'
 #filename = 'test.json'
 
 if require.main == module
-  {shuttles, regions} = parseFile process.argv[2] || filename, debug:true
+  f = process.argv[2] || filename
+  {shuttles, regions} = data = parseFile f, debug:true
 
-  console.log s.type, s.pushedBy, s.states for s in shuttles
+  for s,sid in shuttles
+    console.log "shuttle #{sid} (#{s.type}):"
+    console.log 'pushedby', s.pushedBy
+    console.log state for state in s.states
+
+  graphFile = f.split('.')[0] + '.svg'
+  util.drawRegionGraph data, graphFile
 
