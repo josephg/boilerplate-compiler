@@ -51,6 +51,9 @@ class Parser
     # Figure out all the places shuttles can move to, filling a cloud in the shuttle grid.
     @findShuttleStates()
 
+    # Ok, now calculate all the successor states for each shuttle state.
+    @findSuccessorStates s for s in @shuttles
+
     # Find & fill all regions in the edge grid.
     @fillRegions()
 
@@ -87,6 +90,7 @@ class Parser
           @shuttles.push s =
             points: [] # List of points in the shuttle in the base state
             fill: {} # Map from x,y -> [true if filled in state=index]
+            stateGrid: {}
             states: [] # List of the {dx,dy,pushedBy} of each state
             adjacentTo: {} # Map from {x,y} -> [region id]
             moves: {x:false, y:false}
@@ -107,8 +111,7 @@ class Parser
   findShuttleStates: ->
     # For each shuttle, figure out where it can move to.
     for s,id in @shuttles when !s.immobile
-      numStates = 0
-
+      # Find all the states.
       fill {x:0, y:0}, (dx, dy) =>
         # x, y is an offset for the shuttle. Figure out if its viable.
         #
@@ -118,9 +121,10 @@ class Parser
           if @get(x+dx, y+dy) not in ['nothing', 'shuttle', 'thinshuttle']
             return false
   
-        state = numStates++
+        stateid = s.states.length
         # pushedBy is a list of {rid,mx,my} multipliers
-        s.states.push {dx, dy, pushedBy:[], tempPushedBy:{}}
+        s.states.push {dx, dy, pushedBy:[], tempPushedBy:{}, successors:[]}
+        s.stateGrid["#{dx},#{dy}"] = stateid
 
         s.moves.x = true if dx
         s.moves.y = true if dy
@@ -136,19 +140,48 @@ class Parser
           @shuttleGrid[[_x, _y]] = id
 
           f = (s.fill[[_x, _y]] ?= [])
-          f[state] = true
+          f[stateid] = true
           #f.push state
 
         #console.log 'it could move to ', dx, dy
         return true
 
-      s.numStates = numStates
-      s.immobile = true if numStates is 1
+      s.immobile = true if s.states.length is 1
+
 
       #console.log "Shuttle #{id} has #{numStates} states"
       #console.log s
-   
 
+  findSuccessorStates: (s) ->
+    return if s.immobile
+
+    if s.moves.x && s.moves.y
+      # up, right, down, left.
+      ds = [{dx:0,dy:-1}, {dx:1,dy:0}, {dx:0,dy:1}, {dx:-1,dy:0}]
+    else if s.moves.x
+      ds = [{dx:-1,dy:0}, {dx:1,dy:0}]
+    else if s.moves.y
+      ds = [{dx:0,dy:-1}, {dx:0,dy:1}]
+    else
+      return
+
+    #console.log s.stateGrid
+    for state,sid in s.states
+      for {dx,dy},i in ds
+        successor = s.stateGrid["#{state.dx+dx},#{state.dy+dy}"]
+        state.successors[i] = successor ? sid
+
+      code = state.successors.join ' '
+      if sid is 0
+        globalSuccessors = code
+      else if globalSuccessors
+        globalSuccessors = null if globalSuccessors != code
+
+    if globalSuccessors
+      # All the successor lists are the same! Hoist!
+      s.successors = s.states[0].successors
+      for state in s.states
+        delete state.successors
 
   makeRegionFrom: (x, y, isTop) ->
     k = "#{x},#{y},#{isTop}"
@@ -415,10 +448,10 @@ parseFile = exports.parseFile = (filename, opts) ->
 
 
 #filename = 'almostEmpty.json'
-#filename = 'and-or2.json'
+filename = 'and-or2.json'
 #filename = 'cpu.json'
 #filename = 'oscillator.json'
-filename = 'exclusive.json'
+#filename = 'exclusive.json'
 #filename = 'fork.json'
 #filename = '4spin.json'
 #filename = 'test.json'
@@ -426,5 +459,5 @@ filename = 'exclusive.json'
 if require.main == module
   {shuttles, regions} = parseFile filename, debug:true
 
-  #console.log s.pushedBy, s.states for s in shuttles
+  console.log s.successors, s.states for s in shuttles
 

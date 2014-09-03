@@ -61,6 +61,36 @@ var zonePressure = new #{intArray engines.length}(#{regions.length});
 
 """
 
+  do ->
+    # Shuttle successor map.
+    successorData = []
+    # This map maps from successor list strings (12,2,1,3) to the position in
+    # the successor map. Its used to dedup successor lists between shuttles.
+    map = {}
+    # Add successors to the map
+    addToMap = (list) ->
+      #console.log 'add', list
+      key = list.join ','
+      idx = map[key]
+      if !idx?
+        idx = successorData.length
+        successorData.push v for v in list
+        map[key] = idx
+      idx
+
+    for s in shuttles
+      if s.successors
+        # These'll get special cased into a ternery anyway.
+        continue if s.states.length is 2
+        s.successorIdx = addToMap s.successors
+      else
+        for state in s.states
+          state.successorIdx = addToMap state.successors
+
+    if successorData.length
+      W "var successors = [#{successorData.join ','}];"
+      
+
   nonExclusiveMap = {}
   do -> # Non-exclusive engine code block
     # Its possible that an engine will be used by multiple zones, and we need to
@@ -163,9 +193,9 @@ function step() {
     pressureExpr = (rid) ->
       if opts.fillMode is 'engines'
         # In engine fill mode, some dependant regions haven't been calculated this tick.
-        "(zone = #{rid} - base, zone < 0 ? 0 : zonePressure[zone])"
+        "(zone = regionZone[#{rid}] - base, zone < 0 ? 0 : zonePressure[zone])"
       else
-        "zonePressure[#{rid} - base]"
+        "zonePressure[regionZone[#{rid}] - base]"
 
     forceExpr = (mult, rid) ->
       # An expression for multiplier * <pressure in rid>
@@ -185,7 +215,8 @@ function step() {
     W "  var force;"
     for s,sid in shuttles when !s.immobile
       #console.log s.pushedBy
-      for d in ['x', 'y'] when s.moves[d]
+      for d in ['y', 'x'] when s.moves[d]
+        # y first to match the behaviour of the simulator
         W "\n  // Calculating #{d} force for shuttle #{sid}"
         writeForceExpr s.pushedBy if s.pushedBy.length
 
@@ -215,6 +246,20 @@ function step() {
 
         W "  if (force) {"
 
+        # Figure out the successor.
+        #
+        # This is special cased because simple 2 state shuttles are _super_ common.
+        if s.successors
+          if s.states.length is 2
+            W "    shuttleState[#{sid}] = force < 0 ? #{s.successors[0]} : #{s.successors[1]};"
+          else
+            # Lookup the new shuttle state in our state map.
+            #W "    shuttleState[#{sid}] = force < 0 ? successors[#{s.successorIdx}] : successors[#{s.successorIdx + 1
+
+        #else if s.su
+
+
+
         W "  }"
 
 
@@ -231,7 +276,8 @@ if require.main == module
   {parseFile} = require('./parser')
   #filename = 'and-or2.json'
   filename = 'exclusive.json'
-  #filename = 'cpu.json'
+  filename = 'cpu.json'
+  filename = 'elevator.json'
   #filename = 'oscillator.json'
   data = parseFile filename
   genCode data, process.stdout, debug:true, fillMode:'shuttles', module:'pure'
