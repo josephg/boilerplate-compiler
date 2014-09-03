@@ -13,6 +13,9 @@ edges = [
   {ex:0,ey:1,isTop:true,dx:0,dy:1}
 ]
 
+numericSort = (a, b) -> (a|0) - (b|0)
+sortedKeys = (obj, fn = numericSort) -> Object.keys(obj).sort(fn)
+
 # This is basically a big function, but there's a lot of shared data between
 # the different helper functions. I'm using a class mostly so I can bind this.
 class Parser
@@ -49,10 +52,7 @@ class Parser
     @annotateGrid()
     
     # Figure out all the places shuttles can move to, filling a cloud in the shuttle grid.
-    @findShuttleStates()
-
-    # Ok, now calculate all the successor states for each shuttle state.
-    @findSuccessorStates s for s in @shuttles
+    @findShuttleStates s,sid for s,sid in @shuttles when !s.immobile
 
     # Find & fill all regions in the edge grid.
     @fillRegions()
@@ -90,7 +90,6 @@ class Parser
           @shuttles.push s =
             points: [] # List of points in the shuttle in the base state
             fill: {} # Map from x,y -> [true if filled in state=index]
-            stateGrid: {}
             states: [] # List of the {dx,dy,pushedBy} of each state
             adjacentTo: {} # Map from {x,y} -> [region id]
             moves: {x:false, y:false}
@@ -108,80 +107,101 @@ class Parser
             else
               false
 
-  findShuttleStates: ->
-    # For each shuttle, figure out where it can move to.
-    for s,id in @shuttles when !s.immobile
-      # Find all the states.
-      fill {x:0, y:0}, (dx, dy) =>
-        # x, y is an offset for the shuttle. Figure out if its viable.
-        #
-        # We'll assume that any shuttles are either part of the current
-        # shuttle, or they'll move out of the way before we get there.
-        for {x,y} in s.points
-          if @get(x+dx, y+dy) not in ['nothing', 'shuttle', 'thinshuttle']
-            return false
-  
-        stateid = s.states.length
-        # pushedBy is a list of {rid,mx,my} multipliers
-        s.states.push {dx, dy, pushedBy:[], tempPushedBy:{}, successors:[]}
-        s.stateGrid["#{dx},#{dy}"] = stateid
+  findShuttleStates: (s, sid) ->
+    # Find all the places it can move to.
+    extents = null
+    fill {x:0, y:0}, (dx, dy) =>
+      # x, y is an offset for the shuttle. Figure out if its viable.
+      #
+      # We'll assume that any shuttles are either part of the current
+      # shuttle, or they'll move out of the way before we get there.
+      for {x,y} in s.points
+        if @get(x+dx, y+dy) not in ['nothing', 'shuttle', 'thinshuttle']
+          return false
 
-        s.moves.x = true if dx
-        s.moves.y = true if dy
+      # pushedBy is a list of {rid,mx,my} multipliers.
+      s.states.push {dx,dy, pushedBy:[], tempPushedBy:{}}
 
-        # Ok, this state is legit. Mark the filled cells as impassable in this
-        # state.
-        for {x,y} in s.points when @get(x, y) is 'shuttle'
-          _x = x+dx; _y = y+dy
-          currentShuttle = @shuttleGrid[[_x, _y]]
-          if currentShuttle? and currentShuttle != id
-            throw Error 'Potentially overlapping shuttles'
+      s.moves.x = true if dx
+      s.moves.y = true if dy
 
-          @shuttleGrid[[_x, _y]] = id
+      #console.log 'it could move to ', dx, dy
+      return true
 
-          f = (s.fill[[_x, _y]] ?= [])
-          f[stateid] = true
-          #f.push state
+    # Sort them by y then x (top to bottom, left to right)
+    s.states.sort (a, b) -> if a.dy != b.dy then a.dy - b.dy else a.dx - b.dx
 
-        #console.log 'it could move to ', dx, dy
-        return true
+    # Fill @shuttleGrid and populate s.fill
+    for state, stateid in s.states
+      {dx,dy} = state
 
-      s.immobile = true if s.states.length is 1
+      s.initial = stateid if dx == 0 and dy == 0
 
+      # Mark filled cells as impassable in this state.
+      for {x,y} in s.points when @get(x, y) is 'shuttle'
+        _x = x+dx; _y = y+dy
+        k = "#{_x},#{_y}"
 
-      #console.log "Shuttle #{id} has #{numStates} states"
-      #console.log s
+        # Check that we aren't overlapping with another shuttle. (Technically
+        # valid, but not allowed by this compiler)
+        currentShuttle = @shuttleGrid[k]
+        if currentShuttle? and currentShuttle != sid
+          throw Error 'Potentially overlapping shuttles'
 
-  findSuccessorStates: (s) ->
-    return if s.immobile
+        @shuttleGrid[k] = sid
 
-    if s.moves.x && s.moves.y
+        # s.fill is a map from x,y to [<true/falsey>] for passability in each state
+        f = (s.fill[k] ?= [])
+        f[stateid] = true
+
+    # Figure out how we'll calculate the shuttle's successor states in the
+    # generated code.
+    #
+    # 4 different types of shuttles:
+    # - Immobile shuttles (only 1 state, which is the current state)
+    # - Switches. These have 2 states, and if the force is positive, they'll
+    #   move to the appropriate state.
+    # - track shuttles. These slide along a single axis (x or y).
+    # - Everything else. It might make sense to special-case long curved
+    #   tracks at some point, but not yet.
+    s.type = if s.states.length is 1
+      s.immobile = true
+      'immobile'
+    else if s.states.length is 2
+      # The two states are the left/up state (0) and the down/right state (1).
+      # This is sort of a special case of a track and a special case of
+      # statemachine (n=2)
+      s.direction = if s.moves.x then 'x' else 'y'
+      'switch'
+    else if !s.moves.x or !s.moves.y
+      # There's N states, 0...s.states.length. Force will push the shuttle
+      # along the track until the state is 0 or length-1.
+      s.direction = if s.moves.x then 'x' else 'y'
+      'track'
+    else
+      # Big bag o' states. These use a successor graph to figure out what
+      # happens each tick.
+      
+      # We need to figure out how all the states connect to one another.
+      # stateGrid is a map from {dx,dy} to the state's ID.
+      stateGrid = {}
+      for {dx, dy}, stateid in s.states
+        stateGrid["#{dx},#{dy}"] = stateid
+
+      # Because we're a state machine, we have >2 states and can move across the
+      # whole plane.
       # up, right, down, left.
       ds = [{dx:0,dy:-1}, {dx:1,dy:0}, {dx:0,dy:1}, {dx:-1,dy:0}]
-    else if s.moves.x
-      ds = [{dx:-1,dy:0}, {dx:1,dy:0}]
-    else if s.moves.y
-      ds = [{dx:0,dy:-1}, {dx:0,dy:1}]
-    else
-      return
 
-    #console.log s.stateGrid
-    for state,sid in s.states
-      for {dx,dy},i in ds
-        successor = s.stateGrid["#{state.dx+dx},#{state.dy+dy}"]
-        state.successors[i] = successor ? sid
+      for state,stateid in s.states
+        # The state's successors map to the 4 directions in ds.
+        state.successors = for {dx,dy},i in ds
+          stateGrid["#{state.dx+dx},#{state.dy+dy}"] ? stateid
 
-      code = state.successors.join ' '
-      if sid is 0
-        globalSuccessors = code
-      else if globalSuccessors
-        globalSuccessors = null if globalSuccessors != code
+      'statemachine'
 
-    if globalSuccessors
-      # All the successor lists are the same! Hoist!
-      s.successors = s.states[0].successors
-      for state in s.states
-        delete state.successors
+    #console.log "Shuttle #{id} has #{numStates} states"
+    console.log s
 
   makeRegionFrom: (x, y, isTop) ->
     k = "#{x},#{y},#{isTop}"
@@ -355,13 +375,19 @@ class Parser
 
       delete r.tempEdges
 
+    return
+
 
   cleanShuttlePush: ->
     # Rewrite shuttle.states[x].tempPushedBy map to shuttle.pushedBy list and
     # shuttle.states[x].pushedBy list.
     for shuttle in @shuttles
       {x:movesx, y:movesy} = shuttle.moves
-      for rid, {mx,my} of shuttle.states[0].tempPushedBy when (mx && movesx) || (my && movesy)
+      # Same as this, except make sure we end up with a list sorted by rid.
+      firstPushedBy = shuttle.states[0].tempPushedBy
+      for rid in sortedKeys firstPushedBy
+        {mx, my} = firstPushedBy[rid]
+        continue unless (mx && movesx) || (my && movesy)
         shared = yes
 
         for state,stateid in shuttle.states[1...] when shared
@@ -385,7 +411,8 @@ class Parser
 
       # Anything that wasn't shared gets pushed into the state's pushed list.
       for state in shuttle.states
-        for rid, {mx, my} of state.tempPushedBy
+        for rid in sortedKeys state.tempPushedBy
+          {mx, my} = state.tempPushedBy[rid]
           pushed = {rid:+rid}
           pushed.mx = mx if movesx
           pushed.my = my if movesy
@@ -395,6 +422,7 @@ class Parser
 
         delete state.tempPushedBy
 
+    return
 
   calculateEngineExclusivity: (e) ->
     # Engines are exclusive if its impossible for a region to be pressurized
@@ -457,7 +485,7 @@ filename = 'and-or2.json'
 #filename = 'test.json'
 
 if require.main == module
-  {shuttles, regions} = parseFile filename, debug:true
+  {shuttles, regions} = parseFile process.argv[2] || filename, debug:true
 
-  console.log s.successors, s.states for s in shuttles
+  console.log s.type, s.pushedBy, s.states for s in shuttles
 
