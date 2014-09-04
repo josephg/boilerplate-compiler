@@ -278,7 +278,42 @@ function addEngine(zone, engine, engineValue) {
 """
 
   do -> # Region flood fills
-    for r,rid in regions
+
+    fillFromRegion = (rid) ->
+      r = regions[rid]
+      if !r.used
+        r.used = 'primaryOnly'
+      else
+        r.used = 'primary'
+
+      util.fillRegions regions, rid, (rid, trace) ->
+        return no if regions[rid].used is 'transitive'
+        return yes if regions[rid].used
+        regions[rid].used = 'transitive'
+        return yes
+
+    # First find which regions are actually used.
+    opts.fillMode ?= 'all'
+    switch opts.fillMode
+      when 'all'
+        # Flood fill all regions. Good for debugging, but does more work than necessary.
+        fillFromRegion rid for rid in [0...regions.length]
+      when 'shuttles'
+        # Calculate only the pressure of regions which touch a shuttle
+        for s in shuttles
+          for k in s.pushedBy
+            fillFromRegion k.rid
+          for state in s.states
+            for k in state.pushedBy
+              fillFromRegion k.rid
+      when 'engines'
+        # Calculate the pressure of all regions which connect to an engine.
+        # (And everything else can be inferred to have 0 pressure).
+        for e in engines
+          fillFromRegion rid for rid in e.regions
+
+
+    for r,rid in regions when r.used
       W """
 function calc#{rid}(z) {
   regionZone[#{rid}] = z;
@@ -348,48 +383,19 @@ function step() {
     # For each region, is it possible we've already figured out which zone its in?
     alreadyZoned = new Array regions.length
 
-    fillFromRegion = (rid) ->
-      #console.log 'fillFromRegion', rid
-      return if alreadyZoned[rid] is true
+    W "var zone;" if opts.fillMode is 'engines'
 
-      if alreadyZoned[rid]
+    for r,rid in regions when r.used in ['primary', 'primaryOnly']
+      if r.used is 'primary'
         W "if (regionZone[#{rid}] < base) {"
         W.indentation++
 
       W "zonePressure[nextZone - base] = 0;"
       W "calc#{rid}(nextZone++);"
 
-      if alreadyZoned[rid]
+      if r.used is 'primary'
         W.indentation--
         W "}"
-
-      util.fillRegions regions, rid, (rid, trace) ->
-        if alreadyZoned[rid]
-          no
-        else
-          alreadyZoned[rid] = 'maybe'
-          yes
-      alreadyZoned[rid] = true
-
-    opts.fillMode ?= 'all'
-    switch opts.fillMode
-      when 'all'
-        # Flood fill all regions. Good for debugging, but does more work than necessary.
-        fillFromRegion rid for rid in [0...regions.length]
-      when 'shuttles'
-        # Calculate only the pressure of regions which touch a shuttle
-        for s in shuttles
-          for k in s.pushedBy
-            fillFromRegion k.rid
-          for state in s.states
-            for k in state.pushedBy
-              fillFromRegion k.rid
-      when 'engines'
-        W "var zone;"
-        # Calculate the pressure of all regions which connect to an engine.
-        # (And everything else can be inferred to have 0 pressure).
-        for e in engines
-          fillFromRegion rid for rid in e.regions
 
     W()
 
@@ -449,7 +455,7 @@ function step() {
     W.indentation--
     W "}\n"
 
-    if module is 'node'
+    if opts.module is 'node'
       W "module.exports = {states:shuttleState, step:step};"
     else
       W "return {states:shuttleState, step:step};"
