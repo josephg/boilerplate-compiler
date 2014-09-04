@@ -5,6 +5,21 @@
 
 util = require './util'
 
+indentedStream = (stream) ->
+  W = (str = '') ->
+    lines = str.split '\n'
+    for l in lines
+      stream.write '  ' for [0...W.indentation]
+      stream.write l + '\n'
+  W.indentation = 0
+  W.block = (f) ->
+    W.indentation++
+    f()
+    W.indentation--
+
+  W
+
+
 uintArray = (max) ->
   if max < 256
     'Uint8Array'
@@ -297,28 +312,40 @@ emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
   path.pop()
 
 
-genCode = (parserData, stream, opts = {}) ->
-  opts.fillMode ?= 'all'
-  throw Error 'fillMode must be all, shuttles or engines' unless opts.fillMode in ['all', 'shuttles', 'engines']
-  # Headers and stuff.
+# ********** Entry point starts here **************
 
-  W = (str = '') ->
-    lines = str.split '\n'
-    for l in lines
-      stream.write '  ' for [0...W.indentation]
-      stream.write l + '\n'
-  W.indentation = 0
-  W.block = (f) ->
-    W.indentation++
-    f()
-    W.indentation--
-
+# Options:
+# - fillMode: One of 'all', 'shuttles', 'engines'. Says where we should fill from.
+#   Defaults to either shuttles or engines, whichever is smaller. You should
+#   pick engines if you explicitly need the pressure of all regions to be
+#   calculated.
+#
+# - debug: Set to true to force the printing of the grid at the top of the
+#   file. Set to false to forbid it.
+#
+# - module: One of 'bare', 'node' or 'fn'. Defaults to 'node'.
+#   bare mode creates a function body
+#   node creates a nodejs module
+#   fn mode creates self calling closure-wrapped function.
+gen = exports.gen = (parserData, stream, opts = {}) ->
   {shuttles, regions, engines} = parserData
+  W = indentedStream stream
 
+  # The code for calculating engine force is a little bigger - I should
+  # probably add a multiplier here or something.
+  if opts.fillMode
+    throw Error 'fillMode must be all, shuttles or engines' unless opts.fillMode in ['all', 'shuttles', 'engines']
+  else
+    opts.fillMode = if shuttles.length > engines.length then 'shuttles' else 'engines'
+
+  opts.module ?= 'node'
+
+
+  # Headers.
   W "// Generated from boilerplate-compiler v1 in fill mode '#{opts.fillMode}'"
   W "// #{shuttles.length} shuttles, #{regions.length} regions and #{engines.length} engines"
 
-  if opts.debug && regions.length < 20
+  if opts.debug || (!opts.debug? && regions.length < 20)
     W "/* Compiled grid\n"
 
     {extents, grid, edgeGrid} = parserData
@@ -328,6 +355,7 @@ genCode = (parserData, stream, opts = {}) ->
 
     W "*/\n"
   
+  # Ok, now start the module.
   W "(function(){" if opts.module isnt 'bare'
 
   # Map from shuttle ID -> offset in the successor map.
@@ -335,12 +363,13 @@ genCode = (parserData, stream, opts = {}) ->
 
   do -> # Variables
     maxStates = 0
-    for s in shuttles
+    initialStates = for s in shuttles
       #console.log s
       maxStates = s.states.length if s.states.length > maxStates
+      s.initial
 
     W """
-var shuttleState = new #{uintArray maxStates}(#{shuttles.length});
+var shuttleState = new #{uintArray maxStates}([#{initialStates.join ','}]);
 var regionZone = new Uint32Array(#{regions.length});
 var base = 1;
 
@@ -363,10 +392,7 @@ var zonePressure = new #{intArray engines.length}(#{regions.length});
       W "var successors = [#{successorData.join ','}];"
 
     W()
-    for s,sid in shuttles when s.initial != 0
-      W "shuttleState[#{sid}] = #{s.initial};"
-    W()
-      
+ 
 
   nonExclusiveMap = {}
   do -> # Non-exclusive engine code block
@@ -550,12 +576,15 @@ function calc#{rid}(z) {
       W "base = nextZone;"
     W "}\n"
 
-    if opts.module is 'node'
-      W "module.exports = {states:shuttleState, step:step};"
-    else
-      W "return {states:shuttleState, step:step};"
+  if opts.module is 'node'
+    W "module.exports = {states:shuttleState, step:step};"
+  else
+    W "return {states:shuttleState, step:step};"
 
-    W "})();" if opts.module isnt 'bare'
+  W "})();" if opts.module isnt 'bare'
+
+  if stream != process.stdout
+    stream.end()
 
 
 if require.main == module
@@ -566,6 +595,5 @@ if require.main == module
   filename = 'elevator.json'
   #filename = 'oscillator.json'
   data = parseFile process.argv[2] || filename
-  genCode data, process.stdout, debug:true, fillMode:'shuttles', module:'node'
-
+  gen data, process.stdout, module:'node'
 
