@@ -81,18 +81,20 @@ emitForceExpr = (opts, W, sid, s, d) ->
       else if lastKey == key
         lastForce.distance++
         # >= so the biggestStateForce will prefer to be a late one.
-        if lastForce.distance >= elseDistance
-          elseDistance = lastForce.distance
-          elseIdx = byState.length - 1
       else
         lastKey = key
         lastForce = stateforce
         byState.push stateforce
 
+      if lastForce.distance >= elseDistance
+        elseDistance = lastForce.distance
+        elseIdx = byState.length - 1
+
     #console.log @global, @byState, @exhaustive
     #console.log bs for bs in @byState
     
     if exhaustive
+      #console.log 'sss', elseIdx
       elseForce = byState[elseIdx]
 
   # ***** Emit
@@ -114,17 +116,21 @@ emitForceExpr = (opts, W, sid, s, d) ->
     multExpr = if mult is 1 then '+' else if mult is -1 then '-' else "+ #{mult}*"
     "#{multExpr} #{pressureExpr(rid)}"
 
-  writeForceExpr = (list, isAlreadySet) ->
+  writeForceExpr = (list) ->
+    W.block ->
+      for {rid, mult} in list
+        W "#{forceExpr mult, rid}"
+
+  writeForceStatement = (list, isAlreadySet) ->
     W "force #{if isAlreadySet then '+=' else '='}"
     W.block ->
       for {rid, mult} in list
         W "#{forceExpr mult, rid}"
     W ";"
 
-
   # isAlreadySet: Is the force variable reset from the previous calculation?
   isAlreadySet = if global.length
-    writeForceExpr global
+    writeForceStatement global
     yes
   else
     no
@@ -137,49 +143,60 @@ emitForceExpr = (opts, W, sid, s, d) ->
   numSmallConditions = 0
   numSmallConditions++ for stateforce in byState when stateforce.distance < 2
 
-  first = true
-  emitIfBlock = (stateforce) ->
+  # This emits (cond) ? expr : 
+  emitTernary = (stateforce) ->
     cond = shuttleInRangeExpr [], s.states.length, "state", stateforce.base, stateforce.distance
-    W "#{if !first then 'else ' else ''}if (#{cond.join '&&'}) {"
-    W.block ->
-      writeForceExpr stateforce.list, isAlreadySet
-    W "}"
-    first = false
+    W "(#{cond.join '&&'}) ? ("
+    writeForceExpr stateforce.list
+    W ") :"
 
   if numSmallConditions <= 2
+    #console.log 'elseforce', elseForce, exhaustive
     # Use chained if statements for everything.
-    for stateforce,i in byState when stateforce != elseForce
-      emitIfBlock stateforce
-    if elseForce
+    W "force #{if isAlreadySet then '+=' else '='}"
+    W.block ->
+      for stateforce,i in byState when stateforce != elseForce
+        emitTernary stateforce
 
-      if !first
-        W "else {"
-        W.indentation++
-        W "// States #{elseForce.base} to #{elseForce.base + elseForce.distance - 1}"
+      if elseForce
+        if elseForce.distance > 1
+          W "  // States #{elseForce.base} to #{elseForce.base + elseForce.distance - 1}"
+        else
+          W "  // State #{elseForce.base}"
 
-      writeForceExpr elseForce.list, isAlreadySet
-
-      if !first
-        W.indentation--
-        W "}"
+        writeForceExpr elseForce.list, isAlreadySet
+        W ";"
+      else
+        W "0;"
   else
     # Emit everything that spans a range, and we'll use a switch for everything else.
+    emittedOne = false
     for stateforce in byState when stateforce.distance > 2 && stateforce != elseForce
+      if !emittedOne
+        W "force #{if isAlreadySet then '+=' else '='}"
+        W.indentation++
+
+      for stateforce,i in byState when stateforce != elseForce
+        emitTernary stateforce
+
+      emittedOne = true
       stateforce.done = true
-      emitIfBlock stateforce
+    if emittedOne
+      W "0;"
+      W.indentation--
 
     W "switch(state) {"
     W.block ->
       for stateforce in byState when !stateforce.done && stateforce != elseForce
         W "case #{sid}:" for sid in [stateforce.base...stateforce.base + stateforce.distance]
         W.block ->
-          writeForceExpr stateforce.list, isAlreadySet
+          writeForceStatement stateforce.list, isAlreadySet
           W "break;"
 
       if elseForce
         W "default:"
         W.block ->
-          writeForceExpr elseForce.list, isAlreadySet
+          writeForceStatement elseForce.list, isAlreadySet
     W "}"
 
   return yes
