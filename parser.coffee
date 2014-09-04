@@ -194,8 +194,8 @@ class Parser
 
       # Because we're a state machine, we have >2 states and can move across the
       # whole plane.
-      # up, right, down, left.
-      ds = [{dx:0,dy:-1}, {dx:1,dy:0}, {dx:0,dy:1}, {dx:-1,dy:0}]
+      # up, down, left, right.
+      ds = [{dx:0,dy:-1}, {dx:0,dy:1}, {dx:-1,dy:0}, {dx:1,dy:0}]
 
       for state,stateid in s.states
         # The state's successors map to the 4 directions in ds.
@@ -205,7 +205,7 @@ class Parser
       'statemachine'
 
     #console.log "Shuttle #{id} has #{numStates} states"
-    console.log s
+    #console.log s
 
   makeRegionFrom: (x, y, isTop) ->
     k = "#{x},#{y},#{isTop}"
@@ -352,7 +352,7 @@ class Parser
               filledStates = s.fill[k]
               return no if filledStates && filledStates[stateid]
 
-              #console.log "exploring #{x},#{y}"
+              #console.log "state #{stateid} exploring #{x},#{y}"
               #@printPoint x, y
 
               # Mark that this cell is adjacent to the region in this state.
@@ -394,6 +394,16 @@ class Parser
 
       delete r.tempEdges
 
+    ###
+    if @opts.debug
+      for s,sid in @shuttles
+        console.log 'adj', sid
+        console.log s.adjacentTo
+
+      for r,rid in @regions
+        console.log 'region', rid
+        console.log 'c', c.rid, c.stateid for k,c of r.connections
+    ###
     return
 
 

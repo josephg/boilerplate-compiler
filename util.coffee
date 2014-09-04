@@ -81,6 +81,7 @@ exports.gridExtents = (grid) ->
 
   {top, left, bottom, right}
 
+
 exports.printGrid = ({top, left, bottom, right}, grid, stream = process.stdout) ->
   for y in [top-1..bottom+1]
     stream.write ''
@@ -101,15 +102,22 @@ exports.printPoint = ({top, left, bottom, right}, grid, px, py) ->
     process.stdout.write '\n'
 
 exports.printEdges = ({top, left, bottom, right}, grid, edgeGrid, stream = process.stdout) ->
+  edgeChar = (x, y, isTop) ->
+    e = edgeGrid["#{x},#{y},#{isTop}"]
+    if e?
+      e % 10
+    else
+      ' '
+
   for y in [top..bottom+1]
     # tops
     for x in [left..right]
-      stream.write " #{edgeGrid[[x,y,true]] ? ' '}"
+      stream.write " #{edgeChar x, y, true}"
     stream.write '\n'
     # lefts
     if y <= bottom
       for x in [left..right+1]
-        stream.write "#{edgeGrid[[x,y,false]] ? ' '}"
+        stream.write "#{edgeChar x, y, false}"
         if x <= right
           stream.write chars[grid[[x, y]]] || ';'
       stream.write '\n'
@@ -117,10 +125,11 @@ exports.printEdges = ({top, left, bottom, right}, grid, edgeGrid, stream = proce
 
 
 exports.drawRegionGraph = (parserData, filename) ->
+  {shuttles, regions} = parserData
   console.log '\n\n\n'
   g = require('graphviz').graph 'regions'
 
-  for r,rid in parserData.regions when numKeys r.connections
+  for r,rid in regions when numKeys r.connections
     color = undefined
     name = "#{rid}"
     if r.pressure > 0
@@ -133,19 +142,20 @@ exports.drawRegionGraph = (parserData, filename) ->
     r.graphName = name
     node = g.addNode name, {shape:'box', color}
 
-  for s,sid in parserData.shuttles
+  for s,sid in shuttles
     g.addNode "S#{sid}", {shape:'oval', style:'filled', fillcolor:'plum1'}
 
-  for r,rid in parserData.regions when numKeys r.connections
+  for r,rid in regions when numKeys r.connections
     for k,c of r.connections when c.rid > rid
-      edge = g.addEdge r.graphName, @regions[c.rid].graphName
+      edge = g.addEdge r.graphName, regions[c.rid].graphName
       edge.set 'label', "S#{c.sid} s#{c.stateid}"
 
     if r.dependants
       for d in r.dependants
         g.addEdge r.graphName, "S#{d}"
 
-  console.log g.to_dot()
-  g.output 'svg', "#{filename}.svg"
+  #console.log g.to_dot()
+  g.output filename.split('.')[1], filename
+  console.log "generated #{filename}"
 
 

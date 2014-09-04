@@ -10,20 +10,16 @@ uintArray = (max) ->
     'Uint8Array'
   else if max < 2**16
     'Uint16Array'
-  else if max < 2**32
-    'Uint32Array'
   else
-    'Uint64Array'
+    'Uint32Array'
 
 intArray = (max) ->
   if max < 127
     'Int8Array'
   else if max < 2**15
     'Int16Array'
-  else if max < 2**31
-    'Int32Array'
   else
-    'Int64Array'
+    'Int32Array'
 
 
 shuttleInRangeExpr = (dest, numStates, stateExpr, base, distance) ->
@@ -54,9 +50,9 @@ emitForceExpr = (opts, W, sid, s, d) ->
   # Does byState cover all shuttle states?
   exhaustive = yes
 
-  elseIdx = -1
-
+  elseForce = null
   do ->
+    elseIdx = -1
     elseDistance = 0
 
     # First calculate the global (common) forces on the shuttle
@@ -96,14 +92,13 @@ emitForceExpr = (opts, W, sid, s, d) ->
     #console.log @global, @byState, @exhaustive
     #console.log bs for bs in @byState
     
-    elseIdx = -1 if !exhaustive
-
+    if exhaustive
+      elseForce = byState[elseIdx]
 
   # ***** Emit
 
   # There's no force. The shuttle won't move on its own.
   return no if !global.length && !byState.length
-
 
   pressureExpr = (rid) ->
     if opts.fillMode is 'engines'
@@ -132,14 +127,10 @@ emitForceExpr = (opts, W, sid, s, d) ->
   else
     no
 
+  if s.type != 'shuttle' || byState.length > 0
+    W "state = shuttleState[#{sid}];"
+
   return yes if byState.length is 0
-
-  #numRemaining = @byState.length
-
-
-
-  W "state = shuttleState[#{sid}];"
-
 
   numSmallConditions = 0
   numSmallConditions++ for stateforce in byState when stateforce.distance < 2
@@ -155,113 +146,41 @@ emitForceExpr = (opts, W, sid, s, d) ->
 
   if numSmallConditions <= 2
     # Use chained if statements for everything.
-    for stateforce,i in byState when i != elseIdx
+    for stateforce,i in byState when stateforce != elseForce
       emitIfBlock stateforce
-    if elseIdx >= 0
-      W "else {"
-      W.block ->
-        writeForceExpr byState[elseIdx].list, isAlreadySet
-      W "}"
+    if elseForce
+
+      if !first
+        W "else {"
+        W.indentation++
+        W "// States #{elseForce.base} to #{elseForce.base + elseForce.distance - 1}"
+
+      writeForceExpr elseForce.list, isAlreadySet
+
+      if !first
+        W.indentation--
+        W "}"
   else
     # Emit everything that spans a range, and we'll use a switch for everything else.
-    for stateforce,i in byState when stateforce.distance > 2 && i != elseIdx
+    for stateforce in byState when stateforce.distance > 2 && stateforce != elseForce
       stateforce.done = true
       emitIfBlock stateforce
 
     W "switch(state) {"
     W.block ->
-      for stateforce,i in byState when !stateforce.done && i != elseIdx
+      for stateforce in byState when !stateforce.done && stateforce != elseForce
         W "case #{sid}:" for sid in [stateforce.base...stateforce.base + stateforce.distance]
         W.block ->
           writeForceExpr stateforce.list, isAlreadySet
           W "break;"
 
-      if elseIdx != -1
+      if elseForce
         W "default:"
         W.block ->
-          writeForceExpr byState[elseIdx].list, isAlreadySet
+          writeForceExpr elseForce.list, isAlreadySet
     W "}"
 
-
-
-  return
-
-  # As we go through, each if-else will raise the state's minimum to proceed
-  stateMin = 0
-  for stateforce in @byState
-
-    cond = shuttleInRangeExpr [], @numStates, "state", stateforce.base, stateforce.distance
-
-    #@W "  if (
-
-
-
-    return
-    #if @exhaustive
-      # Find the worst case
-
-    # We have a few different options here:
-    # - If there's only 1 or 2 byState expressions, emit if()s
-    # - If there's many, but they're exhaustive, find the most complicated and make it the default (else) case
-    # - If there's two, use if-else blocks
-    # - Use if blocks anyway for all cases which are complicated.
-    # Find any blocks with lots in common and emit if statements for them.
-    for stateforce in @byState when stateforce.distance > 4
-      @emitIfBlockFor stateforce, isAlreadySet
-      stateforce.done = true
-      numRemaining--
-
-    #if numRemaining is 1
-
-
-    if @byState.length == 1
-      # Emit a single if block
-      @emitIfBlockFor @byState[0]
-      if !isAlreadySet
-        @W "  else force = 0;"
-      @W()
-    else if numStatesWithPush > 1
-      # Emit a switch
-      @W "  switch(shuttleState[#{sid}]) {"
-      for state,stateid in s.states when state.pushedBy.length
-        @W "    case #{stateid}:"
-        console.log state.pushedBy
-        writeForceExpr state.pushedBy, s.pushedBy.length > 0
-        @W "      break;"
-
-      if !s.pushedBy.length
-        @W "    default: force = 0;"
-      @W "  }"
-
-    @W "  if (force) {"
-
-
-    ###
-
-    # Figure out the successor.
-    #
-    # This is special cased because simple 2 state shuttles are _super_ common.
-    if s.successors
-      if s.states.length is 2
-        @W "    shuttleState[#{sid}] = force < 0 ? #{s.successors[0]} : #{s.successors[1]};"
-      else
-        # Lookup the new shuttle state in our state map.
-        #@W "    shuttleState[#{sid}] = force < 0 ? successors[#{s.successorIdx}] : successors[#{s.successorIdx + 1
-
-    #else if s.su
-    ###
-
-
-    @W "  }"
-
-    yes
-
-  ###
-  emit: ->
-    # y first to match the behaviour of the simulator
-    for d in ['y', 'x'] when @forces[d]
-
-  ###
+  return yes
 
 
 
@@ -292,7 +211,12 @@ genCode = (parserData, stream, opts = {}) ->
 
     W "*/\n"
   
+  W "(function(){"
+
   {shuttles, regions, engines} = parserData
+
+  # Map from shuttle ID -> offset in the successor map.
+  successorPtrs = null
 
   do -> # Variables
     maxStates = 0
@@ -302,35 +226,31 @@ genCode = (parserData, stream, opts = {}) ->
 
     W """
 var shuttleState = new #{uintArray maxStates}(#{shuttles.length});
-var regionZone = new Uint64Array(#{regions.length});
+var regionZone = new Uint32Array(#{regions.length});
 var base = 1;
 
 var zonePressure = new #{intArray engines.length}(#{regions.length});
 """
-    for s,sid in shuttles when s.initial != 0
-      W "shuttleState[#{sid}] = #{s.initial};"
 
-    W()
-
-  do ->
     # Shuttle successor map.
     successorData = []
     # This map maps from successor list strings (12,2,1,3) to the position in
     # the successor map. Its used to dedup successor lists between shuttles.
-    map = {}
-    for s in shuttles when s.type is 'statemachine'
+    #
+    # This is very fancy, but it doesn't happen often. Its probably not worth it.
+    for s,sid in shuttles when s.type is 'statemachine'
+      successorPtrs ||= {}
+      successorPtrs[sid] = successorData.length
       for state in s.states
-        # Add successors to the map
-        key = state.successors.join ','
-        idx = map[key]
-        if !idx?
-          idx = successorData.length
-          successorData.push v for v in state.successors
-          map[key] = idx
-        state.successorIdx = idx
+        successorData.push v for v in state.successors
 
     if successorData.length
       W "var successors = [#{successorData.join ','}];"
+
+    W()
+    for s,sid in shuttles when s.initial != 0
+      W "shuttleState[#{sid}] = #{s.initial};"
+    W()
       
 
   nonExclusiveMap = {}
@@ -345,7 +265,7 @@ var zonePressure = new #{intArray engines.length}(#{regions.length});
 
     if num
       W """
-var engineLastUsedBy = new Uint64Array(#{num});
+var engineLastUsedBy = new Uint32Array(#{num});
 
 // Only used for exclusive engines
 function addEngine(zone, engine, engineValue) {
@@ -378,6 +298,8 @@ function calc#{rid}(z) {
 
       W()
 
+      #console.log r.connections
+
       # Connections
       keys = Object.keys(r.connections).sort (a, b) ->
         a = r.connections[a]
@@ -393,6 +315,7 @@ function calc#{rid}(z) {
       i = 0
       while i < keys.length
         c = r.connections[keys[i]]
+        #console.log "#{rid} <-> #{c.rid} #{c.stateid}"
 
         # Run length encode.
         distance = 1
@@ -400,6 +323,7 @@ function calc#{rid}(z) {
           break if i+1 >= keys.length
           next = r.connections[keys[i+1]]
           break if next.rid != c.rid || next.sid != c.sid
+          break if next.stateid != c.stateid + distance
           i++
           distance++
 
@@ -425,6 +349,7 @@ function step() {
     alreadyZoned = new Array regions.length
 
     fillFromRegion = (rid) ->
+      #console.log 'fillFromRegion', rid
       return if alreadyZoned[rid] is true
 
       if alreadyZoned[rid]
@@ -454,11 +379,11 @@ function step() {
       when 'shuttles'
         # Calculate only the pressure of regions which touch a shuttle
         for s in shuttles
-          for k of s.pushedBy
-            fillFromRegion +k
+          for k in s.pushedBy
+            fillFromRegion k.rid
           for state in s.states
-            for k of state.pushedBy
-              fillFromRegion +k
+            for k in state.pushedBy
+              fillFromRegion k.rid
       when 'engines'
         W "var zone;"
         # Calculate the pressure of all regions which connect to an engine.
@@ -473,20 +398,63 @@ function step() {
 
     # Update the state of all shuttles
     W "var force, state;"
+    W "var successor;" if successorPtrs
     for s,sid in shuttles when !s.immobile
-      W "\n// Calculating force for shuttle #{sid}"
+      W "\n// Calculating force for shuttle #{sid} (#{s.type}) with #{s.states.length} states"
 
+      switch s.type
+        when 'switch', 'track'
+          # Only 1 of these will be true anyway.
+          for d in ['x', 'y'] when s.moves[d]
+            isForce = emitForceExpr opts, W, sid, s, d
+            continue unless isForce
 
-      for d in ['x', 'y'] when s.moves[d]
-        W "// #{d}"
-        emitForceExpr(opts, W, sid, s, d)
+            if s.type is 'switch'
+              W "if (force) shuttleState[#{sid}] = force < 0 ? 0 : 1;"
+            else if s.type is 'track'
+              W "if (force < 0 && state > 0) --shuttleState[#{sid}];"
+              W "else if (force > 0 && state < #{s.states.length - 1}) ++shuttleState[#{sid}];"
+
+        when 'statemachine'
+          # These are a lot more 'fun'.
+          #
+          # We need to calculate the y direction first. If it doesn't move, we
+          # calculate the x direction.
+
+          W "// Y direction:"
+          isYForce = emitForceExpr opts, W, sid, s, 'y'
+
+          successorPtr = successorPtrs[sid]
+          if isYForce
+            W "successor = force === 0 ? state : successors[(force > 0 ? #{1 + successorPtr} : #{successorPtr}) + 4 * state];"
+            W "if (successor === state) {"
+            W.indentation++
+
+          W "// X direction:"
+          isXForce = emitForceExpr opts, W, sid, s, 'x'
+          if isXForce
+            W "successor = force === 0 ? state : successors[(force > 0 ? #{3 + successorPtr} : #{2 + successorPtr}) + 4 * state];"
+          if isYForce
+            W.indentation--
+            W "}"
+
+          if isXForce || isYForce
+            W "shuttleState[#{sid}] = successor;"
 
       #force = 
 
 
+    #W "for (var i = 0; i < nextZone - base; i++) regionZone
     W "base = nextZone;"
     W.indentation--
     W "}\n"
+
+    if module is 'node'
+      W "module.exports = {states:shuttleState, step:step};"
+    else
+      W "return {states:shuttleState, step:step};"
+
+    W "})();"
 
 
 if require.main == module
@@ -497,6 +465,6 @@ if require.main == module
   filename = 'elevator.json'
   #filename = 'oscillator.json'
   data = parseFile process.argv[2] || filename
-  genCode data, process.stdout, debug:true, fillMode:'shuttles', module:'pure'
+  genCode data, process.stdout, debug:true, fillMode:'shuttles', module:'node'
 
 
