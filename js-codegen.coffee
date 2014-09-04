@@ -100,10 +100,12 @@ emitForceExpr = (opts, W, sid, s, d) ->
   # There's no force. The shuttle won't move on its own.
   return no if !global.length && !byState.length
 
+  W "\n// Calculating force for shuttle #{sid} (#{s.type}) with #{s.states.length} states"
+
   pressureExpr = (rid) ->
     if opts.fillMode is 'engines'
       # In engine fill mode, some dependant regions haven't been calculated this tick.
-      "(zone = regionZone[#{rid}] - base, zone < 0 ? 0 : zonePressure[zone])"
+      "(z = regionZone[#{rid}] - base, z < 0 ? 0 : zonePressure[z])"
     else
       "zonePressure[regionZone[#{rid}] - base]"
 
@@ -182,10 +184,95 @@ emitForceExpr = (opts, W, sid, s, d) ->
 
   return yes
 
+emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
+  {zoneExpr} = opts
+  # The path of regions we've travelled through, to make sure we don't loop.
+  if (path = opts.path)
+    path.push rid
+  else
+    path = opts.path = [rid]
 
+  {regions, shuttles, engines} = parserData
+  r = regions[rid]
+
+  W "regionZone[#{rid}] = z;"
+
+  exclusivePressure = 0
+  for eid in r.engines
+    e = engines[eid]
+    if e.exclusive
+      exclusivePressure += e.pressure
+    else
+      W "addEngine(z, #{nonExclusiveMap[eid]}, #{e.pressure});"
+
+  if opts.setBasePressure
+    W "zonePressure[#{zoneExpr}] = #{exclusivePressure};"
+    # Only forcably set pressure in the root of an inline tree.
+    opts.setBasePressure = no
+  else if exclusivePressure > 0
+    W "zonePressure[#{zoneExpr}] += #{exclusivePressure};"
+  else if exclusivePressure < 0
+    W "zonePressure[#{zoneExpr}] -= #{-exclusivePressure};"
+
+  W()
+
+  #console.log r.connections
+
+  # Connections
+  keys = Object.keys(r.connections).sort (a, b) ->
+    a = r.connections[a]
+    b = r.connections[b]
+    if a.rid != b.rid
+      a.rid - b.rid
+    else if a.sid != b.sid
+      a.sid - b.sid
+    else
+      a.stateid - b.stateid
+
+  # Coffeescript for loops are too clever.
+  i = 0
+  while i < keys.length
+    c = r.connections[keys[i]]
+
+    r2 = regions[c.rid]
+    #console.log 'considering connection', c
+    if r2.used is 'primaryOnly' || c.rid in path
+      #console.log '-> Skipped!'
+      i++
+      continue
+
+    #console.log "#{rid} <-> #{c.rid} #{c.stateid}"
+
+    # Run length encode.
+    distance = 1
+    loop
+      break if i+1 >= keys.length
+      next = r.connections[keys[i+1]]
+      break if next.rid != c.rid || next.sid != c.sid
+      break if next.stateid != c.stateid + distance
+      i++
+      distance++
+
+    conditions = ["regionZone[#{c.rid}] !== z"]
+    shuttleInRangeExpr conditions, shuttles[c.sid].states.length, "shuttleState[#{c.sid}]", c.stateid, distance
+
+    if r2.inline
+      W "if (#{conditions.join ' && '}) {"
+      W.block ->
+        emitRegionCalcBody W, parserData, c.rid, nonExclusiveMap, opts
+      W "}"
+    else
+      W "if (#{conditions.join ' && '}) calc#{c.rid}(z);"
+
+    i++
+
+  # Remove myself off the end of the path list.
+  path.pop()
 
 
 genCode = (parserData, stream, opts = {}) ->
+  opts.fillMode ?= 'all'
+  throw Error 'fillMode must be all, shuttles or engines' unless opts.fillMode in ['all', 'shuttles', 'engines']
   # Headers and stuff.
 
   W = (str = '') ->
@@ -199,9 +286,12 @@ genCode = (parserData, stream, opts = {}) ->
     f()
     W.indentation--
 
-  W "// Generated from boilerplate-compiler v0\n"
+  {shuttles, regions, engines} = parserData
 
-  if opts.debug
+  W "// Generated from boilerplate-compiler v1 in fill mode '#{opts.fillMode}'"
+  W "// #{shuttles.length} shuttles, #{regions.length} regions and #{engines.length} engines"
+
+  if opts.debug && regions.length < 20
     W "/* Compiled grid\n"
 
     {extents, grid, edgeGrid} = parserData
@@ -211,9 +301,7 @@ genCode = (parserData, stream, opts = {}) ->
 
     W "*/\n"
   
-  W "(function(){"
-
-  {shuttles, regions, engines} = parserData
+  W "(function(){" if opts.module isnt 'bare'
 
   # Map from shuttle ID -> offset in the successor map.
   successorPtrs = null
@@ -279,6 +367,13 @@ function addEngine(zone, engine, engineValue) {
 
   do -> # Region flood fills
 
+
+    # primaryOnly: recurse _to_ anywhere is ok, nobody can enter.
+    # primary: entrances = number of connections + 1
+    # transitive: entrances = number of connections.
+    #
+    # if (primaryOnly || entrances <= 2) inline else make fn.
+
     fillFromRegion = (rid) ->
       r = regions[rid]
       if !r.used
@@ -287,13 +382,16 @@ function addEngine(zone, engine, engineValue) {
         r.used = 'primary'
 
       util.fillRegions regions, rid, (rid, trace) ->
-        return no if regions[rid].used is 'transitive'
-        return yes if regions[rid].used
-        regions[rid].used = 'transitive'
+        r = regions[rid]
+
+        #console.log "inline #{rid}" if r.inline
+
+        return no if r.used is 'transitive'
+        return yes if r.used
+        r.used = 'transitive'
         return yes
 
     # First find which regions are actually used.
-    opts.fillMode ?= 'all'
     switch opts.fillMode
       when 'all'
         # Flood fill all regions. Good for debugging, but does more work than necessary.
@@ -312,147 +410,114 @@ function addEngine(zone, engine, engineValue) {
         for e in engines
           fillFromRegion rid for rid in e.regions
 
+    for r in regions
+      numConnections = util.numKeys r.connections
+      r.inline = switch r.used
+        when 'primaryOnly'
+          yes
+        when 'primary'
+          numConnections <= 1
+        when 'transitive'
+          numConnections <= 2
+        else
+          no
 
-    for r,rid in regions when r.used
+    for r,rid in regions when r.used && !r.inline
       W """
 function calc#{rid}(z) {
-  regionZone[#{rid}] = z;
 """
-      W.indentation++
-  
-      exclusivePressure = 0
-      for eid in r.engines
-        e = engines[eid]
-        if e.exclusive
-          exclusivePressure += e.pressure
-        else
-          W "addEngine(z, #{nonExclusiveMap[eid]}, #{e.pressure});"
-
-      if exclusivePressure
-        W "zonePressure[z - base] += #{exclusivePressure};"
-
-      W()
-
-      #console.log r.connections
-
-      # Connections
-      keys = Object.keys(r.connections).sort (a, b) ->
-        a = r.connections[a]
-        b = r.connections[b]
-        if a.rid != b.rid
-          a.rid - b.rid
-        else if a.sid != b.sid
-          a.sid - b.sid
-        else
-          a.stateid - b.stateid
-
-      # Coffeescript for loops are too clever.
-      i = 0
-      while i < keys.length
-        c = r.connections[keys[i]]
-        #console.log "#{rid} <-> #{c.rid} #{c.stateid}"
-
-        # Run length encode.
-        distance = 1
-        loop
-          break if i+1 >= keys.length
-          next = r.connections[keys[i+1]]
-          break if next.rid != c.rid || next.sid != c.sid
-          break if next.stateid != c.stateid + distance
-          i++
-          distance++
-
-        conditions = ["regionZone[#{c.rid}] !== z"]
-        shuttleInRangeExpr conditions, shuttles[c.sid].states.length, "shuttleState[#{c.sid}]", c.stateid, distance
-        W "if (#{conditions.join ' && '}) calc#{c.rid}(z);"
-
-        i++
-
-      W.indentation--
+      W.block ->
+        emitRegionCalcBody W, parserData, rid, nonExclusiveMap, zoneExpr:'z - base'
       W "}"
     W()
 
 
   do -> # Step function
-    W """
-function step() {
-  var nextZone = base;
-"""
-    W.indentation++
+    W "function step() {"
+    W.block ->
+      W "var nextZone = base;"
 
-    # For each region, is it possible we've already figured out which zone its in?
-    alreadyZoned = new Array regions.length
-
-    W "var zone;" if opts.fillMode is 'engines'
-
-    for r,rid in regions when r.used in ['primary', 'primaryOnly']
-      if r.used is 'primary'
-        W "if (regionZone[#{rid}] < base) {"
-        W.indentation++
-
-      W "zonePressure[nextZone - base] = 0;"
-      W "calc#{rid}(nextZone++);"
-
-      if r.used is 'primary'
-        W.indentation--
-        W "}"
-
-    W()
+      # For each region, is it possible we've already figured out which zone its in?
+      alreadyZoned = new Array regions.length
 
 
+      zoneIdx = 0
+      varzSet = false
+      for r,rid in regions when r.used in ['primary', 'primaryOnly']
+        W "// Calculating zone for region #{rid}"
+        if r.used is 'primary'
+          zoneIdx = -1
+          W "if (regionZone[#{rid}] < base) {"
+          W.indentation++
 
+        zoneExpr = if zoneIdx == -1
+          if r.inline
+            "z - base"
+          else
+            "nextZone - base"
+        else
+          "#{zoneIdx++}"
 
-    # Update the state of all shuttles
-    W "var force, state;"
-    W "var successor;" if successorPtrs
-    for s,sid in shuttles when !s.immobile
-      W "\n// Calculating force for shuttle #{sid} (#{s.type}) with #{s.states.length} states"
+        if r.inline
+          if !varzSet
+            W "var z;"
+            varzSet = true
+          W "z = nextZone++;"
+          emitRegionCalcBody W, parserData, rid, nonExclusiveMap, zoneExpr:zoneExpr, setBasePressure:yes
+        else
+          W "zonePressure[#{zoneExpr}] = 0;"
+          W "calc#{rid}(nextZone++);"
 
-      switch s.type
-        when 'switch', 'track'
-          # Only 1 of these will be true anyway.
-          for d in ['x', 'y'] when s.moves[d]
-            isForce = emitForceExpr opts, W, sid, s, d
-            continue unless isForce
+        if r.used is 'primary'
+          W.indentation--
+          W "}"
 
-            if s.type is 'switch'
-              W "if (force) shuttleState[#{sid}] = force < 0 ? 0 : 1;"
-            else if s.type is 'track'
-              W "if (force < 0 && state > 0) --shuttleState[#{sid}];"
-              W "else if (force > 0 && state < #{s.states.length - 1}) ++shuttleState[#{sid}];"
+      W()
 
-        when 'statemachine'
-          # These are a lot more 'fun'.
-          #
-          # We need to calculate the y direction first. If it doesn't move, we
-          # calculate the x direction.
+      # Update the state of all shuttles
+      W "var force, state;"
+      W "var successor;" if successorPtrs
+      for s,sid in shuttles when !s.immobile
+        switch s.type
+          when 'switch', 'track'
+            # Only 1 of these will be true anyway.
+            for d in ['x', 'y'] when s.moves[d]
+              isForce = emitForceExpr opts, W, sid, s, d
+              continue unless isForce
 
-          W "// Y direction:"
-          isYForce = emitForceExpr opts, W, sid, s, 'y'
+              if s.type is 'switch'
+                W "if (force) shuttleState[#{sid}] = force < 0 ? 0 : 1;"
+              else if s.type is 'track'
+                W "if (force < 0 && state > 0) --shuttleState[#{sid}];"
+                W "else if (force > 0 && state < #{s.states.length - 1}) ++shuttleState[#{sid}];"
 
-          successorPtr = successorPtrs[sid]
-          if isYForce
-            W "successor = force === 0 ? state : successors[(force > 0 ? #{1 + successorPtr} : #{successorPtr}) + 4 * state];"
-            W "if (successor === state) {"
-            W.indentation++
+          when 'statemachine'
+            # These are a lot more 'fun'.
+            #
+            # We need to calculate the y direction first. If it doesn't move, we
+            # calculate the x direction.
 
-          W "// X direction:"
-          isXForce = emitForceExpr opts, W, sid, s, 'x'
-          if isXForce
-            W "successor = force === 0 ? state : successors[(force > 0 ? #{3 + successorPtr} : #{2 + successorPtr}) + 4 * state];"
-          if isYForce
-            W.indentation--
-            W "}"
+            W "// Y direction:"
+            isYForce = emitForceExpr opts, W, sid, s, 'y'
 
-          if isXForce || isYForce
-            W "shuttleState[#{sid}] = successor;"
+            successorPtr = successorPtrs[sid]
+            if isYForce
+              W "successor = force === 0 ? state : successors[(force > 0 ? #{1 + successorPtr} : #{successorPtr}) + 4 * state];"
+              W "if (successor === state) {"
+              W.indentation++
 
-      #force = 
+            W "// X direction:"
+            isXForce = emitForceExpr opts, W, sid, s, 'x'
+            if isXForce
+              W "successor = force === 0 ? state : successors[(force > 0 ? #{3 + successorPtr} : #{2 + successorPtr}) + 4 * state];"
+            if isYForce
+              W.indentation--
+              W "}"
 
+            if isXForce || isYForce
+              W "shuttleState[#{sid}] = successor;"
 
-    #W "for (var i = 0; i < nextZone - base; i++) regionZone
-    W "base = nextZone;"
-    W.indentation--
+      W "base = nextZone;"
     W "}\n"
 
     if opts.module is 'node'
@@ -460,7 +525,7 @@ function step() {
     else
       W "return {states:shuttleState, step:step};"
 
-    W "})();"
+    W "})();" if opts.module isnt 'bare'
 
 
 if require.main == module
@@ -471,6 +536,6 @@ if require.main == module
   filename = 'elevator.json'
   #filename = 'oscillator.json'
   data = parseFile process.argv[2] || filename
-  genCode data, process.stdout, debug:true, fillMode:'shuttles', module:'node'
+  genCode data, process.stdout, debug:true, fillMode:'engines', module:'node'
 
 
