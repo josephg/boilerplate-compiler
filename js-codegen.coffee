@@ -78,17 +78,18 @@ emitForceExpr = (opts, W, sid, s, d) ->
       if stateforce.list.length is 0
         lastKey = null
         exhaustive = no
-      else if lastKey == key
-        lastForce.distance++
-        # >= so the biggestStateForce will prefer to be a late one.
       else
-        lastKey = key
-        lastForce = stateforce
-        byState.push stateforce
+        if lastKey == key
+          lastForce.distance++
+          # >= so the biggestStateForce will prefer to be a late one.
+        else
+          lastKey = key
+          lastForce = stateforce
+          byState.push stateforce
 
-      if lastForce.distance >= elseDistance
-        elseDistance = lastForce.distance
-        elseIdx = byState.length - 1
+        if lastForce.distance >= elseDistance
+          elseDistance = lastForce.distance
+          elseIdx = byState.length - 1
 
     #console.log @global, @byState, @exhaustive
     #console.log bs for bs in @byState
@@ -202,12 +203,14 @@ emitForceExpr = (opts, W, sid, s, d) ->
   return yes
 
 emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
-  {zoneExpr} = opts
+  {path, zoneIdxExpr, wasCalculated} = opts
   # The path of regions we've travelled through, to make sure we don't loop.
-  if (path = opts.path)
+  if path
     path.push rid
   else
     path = opts.path = [rid]
+
+  wasCalculated[rid] = true if wasCalculated
 
   {regions, shuttles, engines} = parserData
   r = regions[rid]
@@ -223,13 +226,13 @@ emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
       W "addEngine(z, #{nonExclusiveMap[eid]}, #{e.pressure});"
 
   if opts.setBasePressure
-    W "zonePressure[#{zoneExpr}] = #{exclusivePressure};"
+    W "zonePressure[#{zoneIdxExpr}] = #{exclusivePressure};"
     # Only forcably set pressure in the root of an inline tree.
     opts.setBasePressure = no
   else if exclusivePressure > 0
-    W "zonePressure[#{zoneExpr}] += #{exclusivePressure};"
+    W "zonePressure[#{zoneIdxExpr}] += #{exclusivePressure};"
   else if exclusivePressure < 0
-    W "zonePressure[#{zoneExpr}] -= #{-exclusivePressure};"
+    W "zonePressure[#{zoneIdxExpr}] -= #{-exclusivePressure};"
 
   W()
 
@@ -270,7 +273,8 @@ emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
       i++
       distance++
 
-    conditions = ["regionZone[#{c.rid}] !== z"]
+    conditions = []
+    conditions.push "regionZone[#{c.rid}] !== z" if !wasCalculated || wasCalculated[c.rid]
     shuttleInRangeExpr conditions, shuttles[c.sid].states.length, "shuttleState[#{c.sid}]", c.stateid, distance
 
     if r2.inline
@@ -280,6 +284,12 @@ emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
       W "}"
     else
       W "if (#{conditions.join ' && '}) calc#{c.rid}(z);"
+
+      if wasCalculated
+        util.fillRegions regions, c.rid, (rid) ->
+          return no if wasCalculated[rid]
+          wasCalculated[rid] = true
+          return yes
 
     i++
 
@@ -444,7 +454,7 @@ function addEngine(zone, engine, engineValue) {
 function calc#{rid}(z) {
 """
       W.block ->
-        emitRegionCalcBody W, parserData, rid, nonExclusiveMap, zoneExpr:'z - base'
+        emitRegionCalcBody W, parserData, rid, nonExclusiveMap, zoneIdxExpr:'z - base'
       W "}"
     W()
 
@@ -460,6 +470,9 @@ function calc#{rid}(z) {
 
       zoneIdx = 0
       varzSet = false
+      # Mark zones when we might have already traversed them. If we have
+      # definitely never traversed something, we can drop a conditional.
+      wasCalculated = {}
       for r,rid in regions when r.used in ['primary', 'primaryOnly']
         W "// Calculating zone for region #{rid}"
         if r.used is 'primary'
@@ -467,7 +480,7 @@ function calc#{rid}(z) {
           W "if (regionZone[#{rid}] < base) {"
           W.indentation++
 
-        zoneExpr = if zoneIdx == -1
+        zoneIdxExpr = if zoneIdx == -1
           if r.inline
             "z - base"
           else
@@ -480,9 +493,9 @@ function calc#{rid}(z) {
             W "var z;"
             varzSet = true
           W "z = nextZone++;"
-          emitRegionCalcBody W, parserData, rid, nonExclusiveMap, zoneExpr:zoneExpr, setBasePressure:yes
+          emitRegionCalcBody W, parserData, rid, nonExclusiveMap, {zoneIdxExpr, setBasePressure:yes, wasCalculated}
         else
-          W "zonePressure[#{zoneExpr}] = 0;"
+          W "zonePressure[#{zoneIdxExpr}] = 0;"
           W "calc#{rid}(nextZone++);"
 
         if r.used is 'primary'
@@ -553,6 +566,6 @@ if require.main == module
   filename = 'elevator.json'
   #filename = 'oscillator.json'
   data = parseFile process.argv[2] || filename
-  genCode data, process.stdout, debug:true, fillMode:'engines', module:'node'
+  genCode data, process.stdout, debug:true, fillMode:'shuttles', module:'node'
 
 
