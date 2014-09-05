@@ -138,6 +138,8 @@ exports.drawRegionGraph = (parserData, filename) ->
   {shuttles, regions} = parserData
   #console.log '\n\n\n'
   g = require('graphviz').graph 'regions'
+  g.set 'layout', 'fdp'
+  g.set 'K', '1.1'
 
   drawnRegions = {}
   addRegion = (rid) ->
@@ -146,7 +148,7 @@ exports.drawRegionGraph = (parserData, filename) ->
     drawnRegions[rid] = true
 
     color = undefined
-    label = "#{rid}"
+    label = "r#{rid}"
     if r.pressure > 0
       label += "(+#{r.pressure})"
       color = 'green'
@@ -181,7 +183,7 @@ exports.drawRegionGraph = (parserData, filename) ->
 
     for state, stateid in s.states
       edge = addEdge p for p in state.pushedBy
-      edge.set 'penwidth', 1
+      #edge.set 'penwidth', 1
 
   for r,rid in regions when numKeys r.connections
     for k,c of r.connections when c.rid > rid
