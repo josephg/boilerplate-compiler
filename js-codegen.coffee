@@ -571,12 +571,18 @@ function calc#{rid}(z) {
         if r.used is 'primary'
           W.indentation--
           W "}"
+          W()
 
       W()
 
       # Update the state of all shuttles
-      W "var force, state;"
-      W "var successor;" if successorPtrs
+      W "// *** Calculating forces & updating shuttle states"
+
+      if successorPtrs
+        W "var force, state, successor;"
+      else
+        W "var force, state;"
+
       for s,sid in shuttles when !s.immobile
         switch s.type
           when 'switch', 'track'
