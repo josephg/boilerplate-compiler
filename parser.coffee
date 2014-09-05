@@ -521,25 +521,18 @@ parseFile = exports.parseFile = (filename, opts) ->
   parse data, opts
 
 
-
-#filename = 'almostEmpty.json'
-filename = 'and-or2.json'
-#filename = 'cpu.json'
-#filename = 'oscillator.json'
-#filename = 'exclusive.json'
-#filename = 'fork.json'
-#filename = '4spin.json'
-#filename = 'test.json'
-
+# You can invoke this script from the shell and point it at a file. It prints
+# out some debugging information.
 if require.main == module
-  f = process.argv[2] || filename
-  {shuttles, regions} = data = parseFile f, debug:true
+  filename = process.argv[2]
+  throw 'Missing file argument' unless filename
+  {shuttles, regions} = data = parseFile filename, debug:true
 
   for s,sid in shuttles
     console.log "shuttle #{sid} (#{s.type}):"
     console.log 'pushedby', s.pushedBy
     console.log state for state in s.states
 
-  graphFile = f.split('.')[0] + '.svg'
+  graphFile = filename.split('.')[0] + '.svg'
   util.drawRegionGraph data, graphFile
 

@@ -639,11 +639,8 @@ function calc#{rid}(z) {
 
 if require.main == module
   {parseFile} = require('./parser')
-  #filename = 'and-or2.json'
-  filename = 'exclusive.json'
-  filename = 'cpu.json'
-  filename = 'elevator.json'
-  #filename = 'oscillator.json'
-  data = parseFile process.argv[2] || filename
+  filename = process.argv[2]
+  throw 'Missing file argument' unless filename
+  data = parseFile filename
   gen data, process.stdout, module:'node', fillMode:'engines'
 

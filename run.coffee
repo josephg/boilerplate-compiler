@@ -1,3 +1,5 @@
+# Simple script to run the compiled output and print out the states each step
+
 script = process.argv[2]
 
 {states, step} = require "./#{script}"
