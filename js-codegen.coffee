@@ -330,10 +330,15 @@ emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
         "(#{inStateOrs.join ' || '})"
     
     if r2.inline
-      W "if (#{ands.join ' && '}) {"
-      W.block ->
-        emitRegionCalcBody W, parserData, c.rid, nonExclusiveMap, opts
-      W "}"
+      if ands.length
+        W "if (#{ands.join ' && '}) {"
+        W.indentation++
+
+      emitRegionCalcBody W, parserData, c.rid, nonExclusiveMap, opts
+
+      if ands.length
+        W.indentation--
+        W "}"
     else
       W "if (#{ands.join ' && '}) calc#{c.rid}(z);"
 

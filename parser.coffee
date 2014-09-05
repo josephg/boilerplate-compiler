@@ -427,7 +427,7 @@ class Parser
   cleanShuttlePush: ->
     # Rewrite shuttle.states[x].tempPushedBy map to shuttle.pushedBy list and
     # shuttle.states[x].pushedBy list.
-    for shuttle in @shuttles
+    for shuttle in @shuttles when !shuttle.immobile
       {x:movesx, y:movesy} = shuttle.moves
       # Same as this, except make sure we end up with a list sorted by rid.
       firstPushedBy = shuttle.states[0].tempPushedBy
