@@ -1,0 +1,30 @@
+{
+  "name": "boilerplate-compiler",
+  "version": "1.0.0",
+  "description": "Boilerplate compiler",
+  "main": "index.js",
+  "dependencies": {
+    "boilerplate-sim": "^1"
+  },
+  "devDependencies": {
+    "graphviz": "~0.0.8"
+  },
+  "scripts": {
+    "test": "mocha --compilers coffee:coffee-script/register --reporter spec test.coffee",
+    "prepublish": "coffee -cm *.coffee"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/josephg/boilerplate-compiler.git"
+  },
+  "keywords": [
+    "boilerplate",
+    "compiler"
+  ],
+  "author": "Joseph Gentle <me@josephg.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/josephg/boilerplate-compiler/issues"
+  },
+  "homepage": "https://github.com/josephg/boilerplate-compiler"
+}
