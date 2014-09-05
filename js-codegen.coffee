@@ -46,6 +46,44 @@ shuttleInRangeExpr = (dest, numStates, stateExpr, base, distance) ->
     dest.push "#{stateExpr} < #{end}" if end < numStates
   dest
 
+shuttleInAnyState = (stateExpr, stateList) ->
+  numTrue = 0
+  numTrue++ for s in stateList when s
+
+  # We'll return null to say that anything goes.
+  return if numTrue == stateList.length
+
+  orClauses = []
+
+  # Run-length encode the states
+  region = null
+  # Inclusive range. We'll use the past-end-of-list value to emit the last region value.
+  for i in [0..stateList.length]
+    if i >= stateList.length || !stateList[i]
+      if region
+        # handle the region
+        end = region.base + region.distance
+        if region.distance == 1 || (region.distance == 2 && (region.base != 0 && end != stateList.length))
+          orClauses.push "#{stateExpr} === #{region.base}"
+          if region.distance == 2
+            orClauses.push "#{stateExpr} === #{region.base+1}"
+        else
+          # Its bigger than 2 states - make a region for it.
+          ands = []
+          ands.push "#{stateExpr} >= #{region.base}" if region.base > 0
+          ands.push "#{stateExpr} < #{end}" if end < stateList.length
+          orClauses.push ands.join(' && ')
+
+        region = null
+    else
+      # Create / extend the region
+      if region
+        region.distance++
+      else
+        region = {base:i, distance:1}
+
+  orClauses
+
 
 # The pushedBy list is pitifully lacking for our purposes here. Rewrite
 # it again into a run-length encoded list of shuttle list &
@@ -262,54 +300,48 @@ emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
     b = r.connections[b]
     if a.rid != b.rid
       a.rid - b.rid
-    else if a.sid != b.sid
-      a.sid - b.sid
     else
-      a.stateid - b.stateid
+      a.sid - b.sid
 
-  # Coffeescript for loops are too clever.
-  i = 0
-  while i < keys.length
-    c = r.connections[keys[i]]
-
+  for key in keys
+    c = r.connections[key]
     r2 = regions[c.rid]
-    #console.log 'considering connection', c
+
+    #console.log "considering connection from #{rid} to #{c.rid}", c
     if r2.used is 'primaryOnly' || c.rid in path
-      #console.log '-> Skipped!'
-      i++
+      #console.log "-> Skipped!"
       continue
 
     #console.log "#{rid} <-> #{c.rid} #{c.stateid}"
 
     # Run length encode.
-    distance = 1
-    loop
-      break if i+1 >= keys.length
-      next = r.connections[keys[i+1]]
-      break if next.rid != c.rid || next.sid != c.sid
-      break if next.stateid != c.stateid + distance
-      i++
-      distance++
 
-    conditions = []
-    conditions.push "regionZone[#{c.rid}] !== z" if !wasCalculated || wasCalculated[c.rid]
-    shuttleInRangeExpr conditions, shuttles[c.sid].states.length, "shuttleState[#{c.sid}]", c.stateid, distance
+    ands = []
+    ands.push "regionZone[#{c.rid}] !== z" if !wasCalculated || wasCalculated[c.rid]
 
+    inStateOrs = shuttleInAnyState "shuttleState[#{c.sid}]", c.inStates
+
+    # It returns falsy if it happens in all states.
+    if inStateOrs
+      continue if inStateOrs.length is 0
+      ands.push if inStateOrs.length == 1
+        inStateOrs[0]
+      else
+        "(#{inStateOrs.join ' || '})"
+    
     if r2.inline
-      W "if (#{conditions.join ' && '}) {"
+      W "if (#{ands.join ' && '}) {"
       W.block ->
         emitRegionCalcBody W, parserData, c.rid, nonExclusiveMap, opts
       W "}"
     else
-      W "if (#{conditions.join ' && '}) calc#{c.rid}(z);"
+      W "if (#{ands.join ' && '}) calc#{c.rid}(z);"
 
       if wasCalculated
         util.fillRegions regions, c.rid, (rid) ->
           return no if wasCalculated[rid]
           wasCalculated[rid] = true
           return yes
-
-    i++
 
   # Remove myself off the end of the path list.
   path.pop()
@@ -436,11 +468,15 @@ function addEngine(zone, engine, engineValue) {
         r.used = 'primaryOnly'
       else
         r.used = 'primary'
+      #console.log "fill #{rid} with #{r.used}"
 
-      util.fillRegions regions, rid, (rid, trace) ->
-        r = regions[rid]
+      util.fillRegions regions, rid, (rid2, trace) ->
+        r = regions[rid2]
 
-        #console.log "inline #{rid}" if r.inline
+        #console.log "inline #{rid2}" if r.inline
+
+        #console.log "fill via #{rid2}(#{r.used}) trace ", trace
+        #console.log r.connections
 
         return no if r.used is 'transitive'
         return yes if r.used
@@ -598,5 +634,5 @@ if require.main == module
   filename = 'elevator.json'
   #filename = 'oscillator.json'
   data = parseFile process.argv[2] || filename
-  gen data, process.stdout, module:'node'
+  gen data, process.stdout, module:'node', fillMode:'engines'
 

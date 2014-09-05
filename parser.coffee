@@ -321,6 +321,13 @@ class Parser
           letsAirThrough[@get(x+dx, y+dy)] ||
           @shuttleGrid["#{x+dx},#{y+dy}"] != undefined)
 
+  # Utility method to add a connection from rid1 to rid2 in the given state.
+  # You should call this twice (with rid1 and rid2 reversed).
+  addConnection: (rid1, rid2, sid, stateid) ->
+    r = @regions[rid1]
+    numStates = @shuttles[sid].states.length
+    c = (r.connections["#{rid2},#{sid}"] ||= {rid:rid2, sid, inStates:new Array(numStates)})
+    c.inStates[stateid] = true
 
   findRegionConnectionsAndShuttleForce: ->
     # Now go through all the regions and figure out the connectivity
@@ -378,11 +385,8 @@ class Parser
                 if rid2 != undefined && rid2 != rid # && rid2 > rid
                   # Victory
                   #console.log "region #{rid} touches #{rid2} in shuttle #{sid} state #{stateid}"
-
-                  r2 = @regions[rid2]
-                  # No idea what the most convenient representation of this data is yet.
-                  r.connections[[rid2,sid,stateid]] = {rid:rid2, sid, stateid}
-                  r2.connections[[rid,sid,stateid]] = {rid:rid, sid, stateid}
+                  @addConnection rid, rid2, sid, stateid
+                  @addConnection rid2, rid, sid, stateid
 
                 # If this shuttle fills the adjacent state, add a force multiplier.
                 #console.log "#{x+fx},#{y+fy}", s.fill["#{x+fx},#{y+fy}"]
@@ -396,6 +400,18 @@ class Parser
       delete r.tempEdges
 
     ###
+    if @opts.debug
+      for s,sid in @shuttles
+        console.log "shuttle #{sid}"
+        console.log s.adjacentTo
+        for state,stateid in s.states
+          util.moveShuttle @grid, @shuttles, sid, s.initial, stateid
+          console.log "state #{stateid}"
+          util.printCustomGrid @extents, (x, y) =>
+            adjList = s.adjacentTo[[x,y]] || []
+            adjList[stateid] ? @grid[[x,y]]
+          util.moveShuttle @grid, @shuttles, sid, stateid, s.initial
+
     if @opts.debug
       for s,sid in @shuttles
         console.log 'adj', sid
@@ -478,11 +494,12 @@ class Parser
 
     # These fills are symmetric, so we only need n-1 of them.
     for rid in e.regions[1...] when e.exclusive
+      #console.log 'fill from', rid
       fillRegions @regions, rid, (testRid, trace) =>
-        #console.log rid, testRid, trace.path
+        #console.log 'fill', rid, testRid, trace
 
         if testRid != rid and danger[testRid]
-          #console.log "engine #{e} is non-exclusive!"
+          #console.log "engine #{JSON.stringify e} is non-exclusive!"
           e.exclusive = false
         
         # Continue if we still think we're exclusive.

@@ -36,6 +36,15 @@ exports.fill = (initial_square, f) ->
       hmm n.x, n.y-1
   return
 
+# Find the intersection of list1 and list2. Return null if the intersection is
+# empty.
+intersectListOrNull = (list1, list2) ->
+  intersection = null
+  for s,i in list1 when s and list2[i]
+    intersection ||= []
+    intersection[i] = true
+  intersection
+
 # Flood fill through the graph of connected regions. DFS for now - assuming
 # there's no path between regions thats bigger than the node stack.
 exports.fillRegions = (regions, initialRid, f) ->
@@ -45,28 +54,34 @@ exports.fillRegions = (regions, initialRid, f) ->
     shouldExpand = f rid, trace
     return unless shouldExpand
 
-    for k,{rid:nextRid,sid,stateid} of region.connections
+    for k,{rid:nextRid,sid,inStates} of region.connections
       continue if nextRid in trace.path
 
-      currentState = trace.shuttleState[sid]
+      #console.log "connection from #{rid} to #{nextRid} when #{sid} in states #{inStates}"
 
-      if currentState == undefined
-        set = true
-        trace.shuttleState[sid] = stateid
-      else if currentState != stateid
-        # Mutually exclusive states - skip.
-        continue
+      prevStates = trace.shuttleStates[sid]
+
+      if !prevStates
+        trace.shuttleStates[sid] = inStates
       else
-        set = false
+        intersect = intersectListOrNull prevStates, inStates
+
+        # Mutually exclusive states - skip.
+        continue if !intersect
+        
+        trace.shuttleStates[sid] = intersect
 
       trace.path.push nextRid
 
       expand nextRid, trace
 
       trace.path.pop()
-      delete trace.shuttleState[sid] if set
+      if !prevStates
+        delete trace.shuttleStates[sid]
+      else
+        trace.shuttleStates[sid] = prevStates
 
-  expand initialRid, {path:[initialRid], shuttleState:{}}
+  expand initialRid, {path:[initialRid], shuttleStates:{}}
 
 exports.gridExtents = (grid) ->
   # calculate the extents
@@ -81,25 +96,20 @@ exports.gridExtents = (grid) ->
 
   {top, left, bottom, right}
 
-
-exports.printGrid = ({top, left, bottom, right}, grid, stream = process.stdout) ->
+exports.printCustomGrid = printCustomGrid = ({top, left, bottom, right}, getFn, stream = process.stdout) ->
   for y in [top-1..bottom+1]
     stream.write ''
     for x in [left-1..right+1]
-      stream.write chars[grid[[x, y]]] || ';'
+      v = getFn(x, y)
+      stream.write chars[v] || (if v? then ("#{v}")[0] else ';')
     stream.write '\n'
 
-exports.printPoint = ({top, left, bottom, right}, grid, px, py) ->
-  for y in [top-1..bottom+1]
-    process.stdout.write ''
-    for x in [left-1..right+1]
-      process.stdout.write(
-        if x == px and y == py
-          '%'
-        else
-          chars[grid[[x, y]]] || ';'
-      )
-    process.stdout.write '\n'
+exports.printGrid = (extents, grid, stream = process.stdout) ->
+  printCustomGrid extents, ((x, y) -> grid[[x,y]]), stream
+
+exports.printPoint = (extents, grid, px, py) ->
+  get = (x, y) -> if x == px and y == py then '%' else grid[[x,y]]
+  printCustomGrid extents, get, px, py
 
 exports.printEdges = ({top, left, bottom, right}, grid, edgeGrid, stream = process.stdout) ->
   edgeChar = (x, y, isTop) ->
@@ -148,7 +158,10 @@ exports.drawRegionGraph = (parserData, filename) ->
   for r,rid in regions when numKeys r.connections
     for k,c of r.connections when c.rid > rid
       edge = g.addEdge r.graphName, regions[c.rid].graphName
-      edge.set 'label', "S#{c.sid} s#{c.stateid}"
+
+      allowedStates = []
+      allowedStates.push stateid for v, stateid in c.inStates when v
+      edge.set 'label', "S#{c.sid} s#{allowedStates.join(',')}"
 
     if r.dependants
       for d in r.dependants
