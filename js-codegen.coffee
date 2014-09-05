@@ -237,8 +237,6 @@ emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
     e = engines[eid]
     if e.exclusive
       exclusivePressure += e.pressure
-    else
-      W "addEngine(z, #{nonExclusiveMap[eid]}, #{e.pressure});"
 
   if opts.setBasePressure
     W "zonePressure[#{zoneIdxExpr}] = #{exclusivePressure};"
@@ -248,6 +246,11 @@ emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
     W "zonePressure[#{zoneIdxExpr}] += #{exclusivePressure};"
   else if exclusivePressure < 0
     W "zonePressure[#{zoneIdxExpr}] -= #{-exclusivePressure};"
+
+  for eid in r.engines
+    e = engines[eid]
+    if !e.exclusive
+      W "addEngine(z, #{nonExclusiveMap[eid]}, #{e.pressure});"
 
   W()
 

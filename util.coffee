@@ -159,3 +159,21 @@ exports.drawRegionGraph = (parserData, filename) ->
   console.log "generated #{filename}"
 
 
+exports.moveShuttle = (grid, shuttles, sid, from, to) ->
+  return if from == to
+
+  # First remove the shuttle from the grid
+  s = shuttles[sid]
+
+  {dx,dy} = s.states[from]
+  for {x,y,v} in s.points
+    k = "#{x+dx},#{y+dy}"
+    throw 'Shuttle not in state' if grid[k] isnt v
+    grid[k] = 'nothing'
+
+  {dx,dy} = s.states[to]
+  for {x,y,v} in s.points
+    k = "#{x+dx},#{y+dy}"
+    grid[k] = v
+
+

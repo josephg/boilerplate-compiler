@@ -102,11 +102,12 @@ class Parser
 
           # Flood fill the shuttle
           fill {x,y}, (x, y) =>
-            if @get(x, y) in ['shuttle', 'thinshuttle']
+            v = @get x, y
+            if v in ['shuttle', 'thinshuttle']
               s.immobile = false if s.immobile && @get(x,y) is 'shuttle'
 
               @shuttleGrid["#{x},#{y}"] = id
-              s.points.push {x,y}
+              s.points.push {x,y,v}
               true
             else
               false
