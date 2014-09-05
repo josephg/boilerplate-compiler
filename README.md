@@ -29,7 +29,7 @@ compiler.compileFile("myfile.json", opts);
 
 // Compile the specified grid
 var grid = {"0,0":"shuttle","1,0":"nothing","2,0":"negative"};
-compiler.compileFile(grid, opts);
+compiler.compileGrid(grid, opts);
 ```
 
 Options is optional, and can contain:
@@ -64,6 +64,20 @@ However, it doesn't expose these values yet.
 The parser produces a (somewhat giant) structure of data through the course of
 analysing the grid. The format of this structure is still in flux, and it may
 change between compiler minor versions.
+
+You can parse data using:
+
+```javascript
+compiler = require('boilerplate-compiler');
+
+// parse the grid in "myfile.json"
+var ast = compiler.parseFile("myfile.json");
+
+// Compile the specified grid
+var grid = {"0,0":"shuttle","1,0":"nothing","2,0":"negative"};
+var ast = compiler.parse(grid);
+```
+
 
 At a glance, it contains:
 
