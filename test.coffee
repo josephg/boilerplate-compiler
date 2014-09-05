@@ -1,6 +1,7 @@
-{parseFile} = require './parser'
-{gen} = require './js-codegen'
-{gridExtents, printGrid, moveShuttle} = require './util'
+#{parseFile} = require './parser'
+#{gen} = require './js-codegen'
+compiler = require './index'
+{gridExtents, printGrid, moveShuttle} = compiler.util
 
 assert = require 'assert'
 fs = require 'fs'
@@ -14,8 +15,7 @@ compile = (filename, fillMode) ->
     write: (str) -> buffer.push str
     end: ->
 
-  ast = parseFile filename
-  gen ast, stream, {module:'bare', fillMode}
+  ast = compiler.compileFile filename, {stream, module:'bare', fillMode}
 
   code = buffer.join ''
 

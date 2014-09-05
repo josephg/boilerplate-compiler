@@ -11,10 +11,12 @@ exports.genJS = gen
 exports.compileFile = (filename, opts) ->
   ast = parseFile filename, opts
   gen ast, opts.stream, opts
+  ast
 
 # Compile the specified grid. Output will either be opts.stream or standard
 # out.
 exports.compileGrid = (grid, opts) ->
   ast = parse grid, opts
   gen ast, opts.stream, opts
+  ast
 
