@@ -136,36 +136,68 @@ exports.printEdges = ({top, left, bottom, right}, grid, edgeGrid, stream = proce
 
 exports.drawRegionGraph = (parserData, filename) ->
   {shuttles, regions} = parserData
-  console.log '\n\n\n'
+  #console.log '\n\n\n'
   g = require('graphviz').graph 'regions'
 
-  for r,rid in regions when numKeys r.connections
+  drawnRegions = {}
+  addRegion = (rid) ->
+    r = regions[rid]
+    return if drawnRegions[rid]
+    drawnRegions[rid] = true
+
     color = undefined
-    name = "#{rid}"
+    label = "#{rid}"
     if r.pressure > 0
-      name += "(+#{r.pressure})"
+      label += "(+#{r.pressure})"
       color = 'green'
     else if r.pressure < 0
-      name += "(#{r.pressure})"
+      label += "(#{r.pressure})"
       color = 'red'
 
-    r.graphName = name
-    node = g.addNode name, {shape:'box', color}
+    node = g.addNode "r#{rid}", {shape:'box', color}
+    node.set 'label', label
+
+  addRegion rid for r,rid in regions when numKeys r.connections
 
   for s,sid in shuttles
-    g.addNode "S#{sid}", {shape:'oval', style:'filled', fillcolor:'plum1'}
+    node = g.addNode "s#{sid}", {shape:'oval', style:'filled', fillcolor:'plum1'}
+    node.set 'label', "S#{sid} #{s.type}"
+
+    edges = {}
+    addEdge = ({rid, mx, my}) ->
+      edge = edges[rid]
+      return edge if edge
+
+      addRegion rid
+      pressure = (mx||0) + (my||0)
+      color = if pressure < 0 then 'red' else if pressure > 0 then 'green' else 'black'
+      edges[rid] = edge = g.addEdge "r#{rid}", "s#{sid}"
+      edge.set 'color', color
+      edge.set 'penwidth', 2
+      edge.set "dir", "forward"
+      edge
+
+    addEdge p for p in s.pushedBy
+
+    for state, stateid in s.states
+      edge = addEdge p for p in state.pushedBy
+      edge.set 'penwidth', 1
 
   for r,rid in regions when numKeys r.connections
     for k,c of r.connections when c.rid > rid
-      edge = g.addEdge r.graphName, regions[c.rid].graphName
+      edge = g.addEdge "r#{rid}", "r#{c.rid}"
 
       allowedStates = []
       allowedStates.push stateid for v, stateid in c.inStates when v
-      edge.set 'label', "S#{c.sid} s#{allowedStates.join(',')}"
 
-    if r.dependants
-      for d in r.dependants
-        g.addEdge r.graphName, "S#{d}"
+      stateList = if allowedStates.length <= 3
+        " (#{allowedStates.join(',')})"
+      else
+        "x#{allowedStates.length}"
+      edge.set 'label', "S#{c.sid}#{stateList}"
+
+      #edge = g.addEdge "s#{c.sid}", "r#{rid}"
+      #edge.set 'dir', 'forward'
 
   #console.log g.to_dot()
   g.output filename.split('.')[1], filename
