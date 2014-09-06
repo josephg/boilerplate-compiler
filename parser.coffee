@@ -525,7 +525,7 @@ parseFile = exports.parseFile = (filename, opts) ->
 # out some debugging information.
 if require.main == module
   filename = process.argv[2]
-  throw 'Missing file argument' unless filename
+  throw Error 'Missing file argument' unless filename
   {shuttles, regions} = data = parseFile filename, debug:true
 
   for s,sid in shuttles

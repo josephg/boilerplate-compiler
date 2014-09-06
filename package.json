@@ -7,7 +7,9 @@
     "boilerplate-sim": "^1"
   },
   "devDependencies": {
-    "graphviz": "~0.0.8"
+    "graphviz": "~0.0.8",
+    "coffee-script": "^1.7.1",
+    "mocha": "^1.21.3"
   },
   "scripts": {
     "test": "mocha --compilers coffee:coffee-script/register --reporter spec test.coffee",
