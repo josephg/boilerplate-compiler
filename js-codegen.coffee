@@ -85,6 +85,103 @@ shuttleInAnyState = (stateExpr, stateList) ->
   orClauses
 
 
+emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
+  {path, zoneIdxExpr, wasCalculated} = opts
+  # The path of regions we've travelled through, to make sure we don't loop.
+  if path
+    path.push rid
+  else
+    path = opts.path = [rid]
+
+  wasCalculated[rid] = true if wasCalculated
+
+  {regions, shuttles, engines} = parserData
+  r = regions[rid]
+
+  W "regionZone[#{rid}] = z;"
+
+  exclusivePressure = 0
+  for eid in r.engines
+    e = engines[eid]
+    if e.exclusive
+      exclusivePressure += e.pressure
+
+  if opts.setBasePressure
+    W "zonePressure[#{zoneIdxExpr}] = #{exclusivePressure};"
+    # Only forcably set pressure in the root of an inline tree.
+    opts.setBasePressure = no
+  else if exclusivePressure > 0
+    W "zonePressure[#{zoneIdxExpr}] += #{exclusivePressure};"
+  else if exclusivePressure < 0
+    W "zonePressure[#{zoneIdxExpr}] -= #{-exclusivePressure};"
+
+  for eid in r.engines
+    e = engines[eid]
+    if !e.exclusive
+      W "addEngine(z, #{nonExclusiveMap[eid]}, #{e.pressure});"
+
+  W()
+
+  #console.log r.connections
+
+  # Connections
+  keys = Object.keys(r.connections).sort (a, b) ->
+    a = r.connections[a]
+    b = r.connections[b]
+    if a.rid != b.rid
+      a.rid - b.rid
+    else
+      a.sid - b.sid
+
+  for key in keys
+    c = r.connections[key]
+    r2 = regions[c.rid]
+
+    #console.log "considering connection from #{rid} to #{c.rid}", c
+    if r2.used is 'primaryOnly' || c.rid in path
+      #console.log "-> Skipped!"
+      continue
+
+    #console.log "#{rid} <-> #{c.rid} #{c.stateid}"
+
+    # Run length encode.
+
+    ands = []
+    ands.push "regionZone[#{c.rid}] !== z" if !wasCalculated || wasCalculated[c.rid]
+
+    inStateOrs = shuttleInAnyState "shuttleState[#{c.sid}]", c.inStates
+
+    # It returns falsy if it happens in all states.
+    if inStateOrs
+      continue if inStateOrs.length is 0
+      ands.push if inStateOrs.length == 1
+        inStateOrs[0]
+      else
+        "(#{inStateOrs.join ' || '})"
+    
+    if r2.inline
+      if ands.length
+        W "if (#{ands.join ' && '}) {"
+        W.indentation++
+
+      emitRegionCalcBody W, parserData, c.rid, nonExclusiveMap, opts
+
+      if ands.length
+        W.indentation--
+        W "}"
+    else
+      W "if (#{ands.join ' && '}) calc#{c.rid}(z);"
+
+      if wasCalculated
+        util.fillRegions regions, c.rid, (rid) ->
+          return no if wasCalculated[rid]
+          wasCalculated[rid] = true
+          return yes
+
+  # Remove myself off the end of the path list.
+  path.pop()
+
+
 # The pushedBy list is pitifully lacking for our purposes here. Rewrite
 # it again into a run-length encoded list of shuttle list &
 # rid/multiplier pairs in each direction.
@@ -254,102 +351,6 @@ emitForceExpr = (opts, W, sid, s, d) ->
     W "}"
 
   return yes
-
-emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
-  {path, zoneIdxExpr, wasCalculated} = opts
-  # The path of regions we've travelled through, to make sure we don't loop.
-  if path
-    path.push rid
-  else
-    path = opts.path = [rid]
-
-  wasCalculated[rid] = true if wasCalculated
-
-  {regions, shuttles, engines} = parserData
-  r = regions[rid]
-
-  W "regionZone[#{rid}] = z;"
-
-  exclusivePressure = 0
-  for eid in r.engines
-    e = engines[eid]
-    if e.exclusive
-      exclusivePressure += e.pressure
-
-  if opts.setBasePressure
-    W "zonePressure[#{zoneIdxExpr}] = #{exclusivePressure};"
-    # Only forcably set pressure in the root of an inline tree.
-    opts.setBasePressure = no
-  else if exclusivePressure > 0
-    W "zonePressure[#{zoneIdxExpr}] += #{exclusivePressure};"
-  else if exclusivePressure < 0
-    W "zonePressure[#{zoneIdxExpr}] -= #{-exclusivePressure};"
-
-  for eid in r.engines
-    e = engines[eid]
-    if !e.exclusive
-      W "addEngine(z, #{nonExclusiveMap[eid]}, #{e.pressure});"
-
-  W()
-
-  #console.log r.connections
-
-  # Connections
-  keys = Object.keys(r.connections).sort (a, b) ->
-    a = r.connections[a]
-    b = r.connections[b]
-    if a.rid != b.rid
-      a.rid - b.rid
-    else
-      a.sid - b.sid
-
-  for key in keys
-    c = r.connections[key]
-    r2 = regions[c.rid]
-
-    #console.log "considering connection from #{rid} to #{c.rid}", c
-    if r2.used is 'primaryOnly' || c.rid in path
-      #console.log "-> Skipped!"
-      continue
-
-    #console.log "#{rid} <-> #{c.rid} #{c.stateid}"
-
-    # Run length encode.
-
-    ands = []
-    ands.push "regionZone[#{c.rid}] !== z" if !wasCalculated || wasCalculated[c.rid]
-
-    inStateOrs = shuttleInAnyState "shuttleState[#{c.sid}]", c.inStates
-
-    # It returns falsy if it happens in all states.
-    if inStateOrs
-      continue if inStateOrs.length is 0
-      ands.push if inStateOrs.length == 1
-        inStateOrs[0]
-      else
-        "(#{inStateOrs.join ' || '})"
-    
-    if r2.inline
-      if ands.length
-        W "if (#{ands.join ' && '}) {"
-        W.indentation++
-
-      emitRegionCalcBody W, parserData, c.rid, nonExclusiveMap, opts
-
-      if ands.length
-        W.indentation--
-        W "}"
-    else
-      W "if (#{ands.join ' && '}) calc#{c.rid}(z);"
-
-      if wasCalculated
-        util.fillRegions regions, c.rid, (rid) ->
-          return no if wasCalculated[rid]
-          wasCalculated[rid] = true
-          return yes
-
-  # Remove myself off the end of the path list.
-  path.pop()
 
 
 # ********** Entry point starts here **************
@@ -642,5 +643,5 @@ if require.main == module
   filename = process.argv[2]
   throw 'Missing file argument' unless filename
   data = parseFile filename
-  gen data, process.stdout, module:'node', fillMode:'engines'
+  gen data, process.stdout, module:'node' #, fillMode:'engines'
 
