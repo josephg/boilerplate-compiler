@@ -65,6 +65,10 @@ class Parser
     # which shuttles it pushes.
     @findRegionConnectionsAndShuttleForce()
 
+    # Neutral regions are regions which can never hold pressure because they
+    # aren't connected to any engines.
+    @findNeutralRegions()
+
     # Trim pushedBy values in shuttles
     @cleanShuttlePush()
 
@@ -210,18 +214,19 @@ class Parser
 
   makeRegionFrom: (x, y, isTop) ->
     k = "#{x},#{y},#{isTop}"
-    id = @edgeGrid[k]
-    return @regions[id] if id isnt undefined
+    rid = @edgeGrid[k]
+    return @regions[rid] if rid isnt undefined
 
     #console.log "making region at #{x}, #{y}, #{isTop}"
 
-    id = @regions.length
+    rid = @regions.length
     @regions.push r =
       engines: []
       connections: {}
       size: 0
       tempEdges: []
       pressure: 0 # Used mostly for debugging - regions can share engines.
+      neutral: true # true if the region is never connected to engines.
 
     to_explore = []
     visited = {}
@@ -234,7 +239,7 @@ class Parser
       k = "#{x},#{y},#{isTop}"
       if @edgeGrid[k] is undefined
         #console.log 'expanding', id, 'to', x, y, isTop
-        @edgeGrid[k] = id
+        @edgeGrid[k] = rid
         to_explore.push {x,y,isTop}
 
     hmm x, y, isTop
@@ -294,7 +299,7 @@ class Parser
       eid = eid|0
       r.engines.push eid
       r.pressure += pressure
-      @engines[eid].regions.push id
+      @engines[eid].regions.push rid
 
     r
 
@@ -423,6 +428,17 @@ class Parser
     ###
     return
 
+  findNeutralRegions: ->
+    for e in @engines
+      for rid in e.regions
+        fillRegions @regions, rid, (rid2, trace) =>
+          r = @regions[rid2]
+          return no if !r.neutral
+          r.neutral = false
+          return yes
+
+    if @opts.debug
+      console.log "region #{rid} neutral" for r,rid in @regions when r.neutral
 
   cleanShuttlePush: ->
     # Rewrite shuttle.states[x].tempPushedBy map to shuttle.pushedBy list and
@@ -431,7 +447,7 @@ class Parser
       {x:movesx, y:movesy} = shuttle.moves
       # Same as this, except make sure we end up with a list sorted by rid.
       firstPushedBy = shuttle.states[0].tempPushedBy
-      for rid in sortedKeys firstPushedBy
+      for rid in sortedKeys firstPushedBy when !@regions[rid].neutral
         {mx, my} = firstPushedBy[rid]
         continue unless (mx && movesx) || (my && movesy)
         shared = yes
@@ -457,7 +473,7 @@ class Parser
 
       # Anything that wasn't shared gets pushed into the state's pushed list.
       for state in shuttle.states
-        for rid in sortedKeys state.tempPushedBy
+        for rid in sortedKeys state.tempPushedBy when !@regions[rid].neutral
           {mx, my} = state.tempPushedBy[rid]
           pushed = {rid:+rid}
           pushed.mx = mx if movesx
@@ -467,6 +483,8 @@ class Parser
             state.pushedBy.push pushed
 
         delete state.tempPushedBy
+
+      #console.log shuttle.pushedBy, (state.pushedBy for state in shuttle.states)
 
     return
 

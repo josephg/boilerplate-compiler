@@ -185,11 +185,12 @@ emitRegionCalcBody = (W, parserData, rid, nonExclusiveMap, opts) ->
 # The pushedBy list is pitifully lacking for our purposes here. Rewrite
 # it again into a run-length encoded list of shuttle list &
 # rid/multiplier pairs in each direction.
-emitForceExpr = (opts, W, sid, s, d) ->
+emitForceExpr = (W, parserData, opts, sid, s, d) ->
   #console.log s.pushedBy, (state.pushedBy for state in s.states)
 
   throw 'Shuttle does not move in direction!' unless s.moves[d]
 
+  {regions} = parserData
 
   # Forces on the shuttle in all positions
   global = []
@@ -208,7 +209,7 @@ emitForceExpr = (opts, W, sid, s, d) ->
     # First calculate the global (common) forces on the shuttle
     for p in s.pushedBy
       mult = p["m#{d}"]
-      if mult
+      if mult && regions[p.rid].used
         global.push {rid:p.rid, mult}
 
     # Scan through all the states. Run-length encode the force for states which
@@ -222,6 +223,8 @@ emitForceExpr = (opts, W, sid, s, d) ->
       for p in state.pushedBy
         mult = p["m#{d}"]
         continue unless mult
+        used = regions[p.rid].used
+        continue if !used # Region was never calculated because its not important
         stateforce.list.push {rid:p.rid, mult}
         key += "#{p.rid} #{mult} "
 
@@ -256,7 +259,8 @@ emitForceExpr = (opts, W, sid, s, d) ->
   W "\n// Calculating force for shuttle #{sid} (#{s.type}) with #{s.states.length} states"
 
   pressureExpr = (rid) ->
-    if opts.fillMode is 'engines'
+    used = parserData.regions[rid].used
+    if opts.fillMode is 'engines' and used != 'primaryOnly'
       # In engine fill mode, some dependant regions haven't been calculated this tick.
       "(z = regionZone[#{rid}] - base, z < 0 ? 0 : zonePressure[z])"
     else
@@ -269,14 +273,15 @@ emitForceExpr = (opts, W, sid, s, d) ->
 
   writeForceExpr = (list) ->
     W.block ->
-      for {rid, mult} in list
+      printedAny = no
+      for {rid, mult} in list when regions[rid].used
+        printedAny = yes
         W "#{forceExpr mult, rid}"
+      W "0" if !printedAny
 
   writeForceStatement = (list, isAlreadySet) ->
     W "force #{if isAlreadySet then '+=' else '='}"
-    W.block ->
-      for {rid, mult} in list
-        W "#{forceExpr mult, rid}"
+    writeForceExpr list
     W ";"
 
   # isAlreadySet: Is the force variable reset from the previous calculation?
@@ -470,6 +475,8 @@ function addEngine(zone, engine, engineValue) {
 
     fillFromRegion = (rid) ->
       r = regions[rid]
+      return if r.neutral
+
       if !r.used
         r.used = 'primaryOnly'
       else
@@ -589,7 +596,7 @@ function calc#{rid}(z) {
           when 'switch', 'track'
             # Only 1 of these will be true anyway.
             for d in ['x', 'y'] when s.moves[d]
-              isForce = emitForceExpr opts, W, sid, s, d
+              isForce = emitForceExpr W, parserData, opts, sid, s, d
               continue unless isForce
 
               if s.type is 'switch'
@@ -605,7 +612,7 @@ function calc#{rid}(z) {
             # calculate the x direction.
 
             W "// Y direction:"
-            isYForce = emitForceExpr opts, W, sid, s, 'y'
+            isYForce = emitForceExpr W, parserData, opts, sid, s, 'y'
 
             successorPtr = successorPtrs[sid]
             if isYForce
@@ -614,7 +621,7 @@ function calc#{rid}(z) {
               W.indentation++
 
             W "// X direction:"
-            isXForce = emitForceExpr opts, W, sid, s, 'x'
+            isXForce = emitForceExpr W, parserData, opts, sid, s, 'x'
             if isXForce
               W "successor = force === 0 ? state : successors[(force > 0 ? #{3 + successorPtr} : #{2 + successorPtr}) + 4 * state];"
             if isYForce
@@ -643,5 +650,5 @@ if require.main == module
   filename = process.argv[2]
   throw 'Missing file argument' unless filename
   data = parseFile filename
-  gen data, process.stdout, module:'node' #, fillMode:'engines'
+  gen data, process.stdout, module:'node'#, fillMode:'engines'
 
