@@ -27,6 +27,7 @@ class Parser
     @engineGrid = {}
     # map from "x,y,isTop" to id of region
     @edgeGrid = {}
+    @regionGrid = {}
 
 
     # This is our final output - a list of shuttles and regions which mutually affect one another.
@@ -279,6 +280,8 @@ class Parser
           # the next pass.
           r.tempEdges.push {x,y,sid,f}
           continue
+
+        @regionGrid[k] = rid if v in ['nothing', 'thinsolid', 'thinshuttle', 'bridge']
 
         #console.log 'v', x, y, v
 

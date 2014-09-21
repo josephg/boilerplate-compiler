@@ -418,8 +418,20 @@ gen = exports.gen = (parserData, stream, opts = {}) ->
 var shuttleState = new #{uintArray maxStates}([#{initialStates.join ','}]);
 var regionZone = new Uint32Array(#{regions.length});
 var base = 1;
+var nextZone;
 
 var zonePressure = new #{intArray engines.length}(#{regions.length});
+
+function getPressure(rid) {
+  var z = regionZone[rid];
+  return z < base ? 0 : zonePressure[z-base];
+}
+
+function step() {
+  calcPressure();
+  updateShuttles();
+}
+
 """
 
     # Shuttle successor map.
@@ -538,9 +550,9 @@ function calc#{rid}(z) {
 
 
   do -> # Step function
-    W "function step() {"
+    W "function calcPressure() {"
     W.block ->
-      W "var nextZone = base;"
+      W "nextZone = base;"
 
       # For each region, is it possible we've already figured out which zone its in?
       alreadyZoned = new Array regions.length
@@ -580,16 +592,17 @@ function calc#{rid}(z) {
           W.indentation--
           W "}"
           W()
-
-      W()
-
+    W "}"
+    W()
+    W "function updateShuttles() {"
+    W.block ->
       # Update the state of all shuttles
       W "// *** Calculating forces & updating shuttle states"
 
       if successorPtrs
-        W "var force, state, successor;"
+        W "var force, state, successor, z;"
       else
-        W "var force, state;"
+        W "var force, state, z;"
 
       for s,sid in shuttles when !s.immobile
         switch s.type
@@ -635,9 +648,9 @@ function calc#{rid}(z) {
     W "}\n"
 
   if opts.module is 'node'
-    W "module.exports = {states:shuttleState, step:step};"
+    W "module.exports = {states:shuttleState, step:step, getPressure:getPressure, calcPressure:calcPressure, updateShuttles:updateShuttles};"
   else
-    W "return {states:shuttleState, step:step};"
+    W "return {states:shuttleState, step:step, getPressure:getPressure, calcPressure:calcPressure, updateShuttles:updateShuttles};"
 
   W "})();" if opts.module isnt 'bare'
 
