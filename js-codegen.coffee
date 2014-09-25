@@ -417,8 +417,7 @@ gen = exports.gen = (parserData, stream, opts = {}) ->
     W """
 var shuttleState = new #{uintArray maxStates}([#{initialStates.join ','}]);
 var regionZone = new Uint32Array(#{regions.length});
-var base = 1;
-var nextZone;
+var base = 1, extent = 1;
 
 var zonePressure = new #{intArray engines.length}(#{regions.length});
 
@@ -431,7 +430,6 @@ function step() {
   calcPressure();
   updateShuttles();
 }
-
 """
 
     # Shuttle successor map.
@@ -552,7 +550,7 @@ function calc#{rid}(z) {
   do -> # Step function
     W "function calcPressure() {"
     W.block ->
-      W "nextZone = base;"
+      W "extent = base;"
 
       # For each region, is it possible we've already figured out which zone its in?
       alreadyZoned = new Array regions.length
@@ -574,7 +572,7 @@ function calc#{rid}(z) {
           if r.inline
             "z - base"
           else
-            "nextZone - base"
+            "extent - base"
         else
           "#{zoneIdx++}"
 
@@ -582,11 +580,11 @@ function calc#{rid}(z) {
           if !varzSet
             W "var z;"
             varzSet = true
-          W "z = nextZone++;"
+          W "z = extent++;"
           emitRegionCalcBody W, parserData, rid, nonExclusiveMap, {zoneIdxExpr, setBasePressure:yes, wasCalculated}
         else
           W "zonePressure[#{zoneIdxExpr}] = 0;"
-          W "calc#{rid}(nextZone++);"
+          W "calc#{rid}(extent++);"
 
         if r.used is 'primary'
           W.indentation--
@@ -644,13 +642,19 @@ function calc#{rid}(z) {
             if isXForce || isYForce
               W "shuttleState[#{sid}] = successor;"
 
-      W "base = nextZone;"
+      W "base = extent;"
     W "}\n"
 
   if opts.module is 'node'
-    W "module.exports = {states:shuttleState, step:step, getPressure:getPressure, calcPressure:calcPressure, updateShuttles:updateShuttles};"
+    W "module.exports = {"
   else
-    W "return {states:shuttleState, step:step, getPressure:getPressure, calcPressure:calcPressure, updateShuttles:updateShuttles};"
+    W "return {"
+
+  #("#{f}:#{f}" for f in ['
+  W "  states:shuttleState, step:step, getPressure:getPressure, calcPressure:calcPressure, updateShuttles:updateShuttles"
+  W "};"
+  W()
+
 
   W "})();" if opts.module isnt 'bare'
 

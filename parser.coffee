@@ -27,8 +27,10 @@ class Parser
     @engineGrid = {}
     # map from "x,y,isTop" to id of region
     @edgeGrid = {}
+    # map from grid position -> ID of region. Note that not all regions will be
+    # represented here - this is mostly for displaying pressure while
+    # rendering.
     @regionGrid = {}
-
 
     # This is our final output - a list of shuttles and regions which mutually affect one another.
     @shuttles = []
