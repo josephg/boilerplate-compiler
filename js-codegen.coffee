@@ -550,7 +550,7 @@ function calc#{rid}(z) {
   do -> # Step function
     W "function calcPressure() {"
     W.block ->
-      W "extent = base;"
+      W "base = extent;"
 
       # For each region, is it possible we've already figured out which zone its in?
       alreadyZoned = new Array regions.length
@@ -642,7 +642,6 @@ function calc#{rid}(z) {
             if isXForce || isYForce
               W "shuttleState[#{sid}] = successor;"
 
-      W "base = extent;"
     W "}\n"
 
   if opts.module is 'node'
