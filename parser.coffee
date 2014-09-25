@@ -114,7 +114,7 @@ class Parser
               s.immobile = false if s.immobile && @get(x,y) is 'shuttle'
 
               @shuttleGrid["#{x},#{y}"] = id
-              s.points "#{x},#{y}" = v
+              s.points["#{x},#{y}"] = v
               true
             else
               false
