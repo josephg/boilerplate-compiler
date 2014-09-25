@@ -99,7 +99,7 @@ class Parser
 
           id = @shuttles.length
           @shuttles.push s =
-            points: [] # List of points in the shuttle in the base state
+            points: {} # Grid of points in the shuttle in the base state
             fill: {} # Map from x,y -> [true if filled in state=index]
             states: [] # List of the {dx,dy,pushedBy} of each state
             adjacentTo: {} # Map from {x,y} -> [region id]
@@ -114,7 +114,7 @@ class Parser
               s.immobile = false if s.immobile && @get(x,y) is 'shuttle'
 
               @shuttleGrid["#{x},#{y}"] = id
-              s.points.push {x,y,v}
+              s.points "#{x},#{y}" = v
               true
             else
               false
@@ -127,7 +127,8 @@ class Parser
       #
       # We'll assume that any shuttles are either part of the current
       # shuttle, or they'll move out of the way before we get there.
-      for {x,y} in s.points
+      for k of s.points
+        {x,y} = parseXY k
         k = "#{x+dx},#{y+dy}"
         # Check that we aren't overlapping with another shuttle. (Technically
         # valid, but not allowed by this compiler)
@@ -158,7 +159,8 @@ class Parser
       s.initial = stateid if dx == 0 and dy == 0
 
       # Mark filled cells as impassable in this state.
-      for {x,y} in s.points when @get(x, y) is 'shuttle'
+      for k,v of s.points when v is 'shuttle'
+        {x,y} = parseXY k
         _x = x+dx; _y = y+dy
         k = "#{_x},#{_y}"
 
