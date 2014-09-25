@@ -134,7 +134,7 @@ class Parser
         # valid, but not allowed by this compiler)
         otherSid = @shuttleGrid[k]
         if otherSid? and otherSid != sid
-          console.warn 'Potentially overlapping shuttles'
+          console.warn "Potentially overlapping shuttles at #{k}"
           return false
 
         if @grid[k] not in ['nothing', 'shuttle', 'thinshuttle']
