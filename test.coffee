@@ -30,8 +30,8 @@ describe 'compiler', ->
   describe 'from test data', ->
     files = fs.readdirSync "#{__dirname}/testdata"
 
-    #for filename in ['elevator.json']
     for fillMode in ['shuttles', 'engines'] then do (fillMode) -> describe "fill mode #{fillMode}", ->
+      #for filename in ['oscillator.json']
       for filename in files when filename.match /\.json$/
         do (filename) -> it filename, ->
           cData = compile "testdata/#{filename}", fillMode

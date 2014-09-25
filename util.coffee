@@ -213,13 +213,15 @@ exports.moveShuttle = (grid, shuttles, sid, from, to) ->
   s = shuttles[sid]
 
   {dx,dy} = s.states[from]
-  for {x,y,v} in s.points
+  for k,v of s.points
+    {x,y} = parseXY k
     k = "#{x+dx},#{y+dy}"
     throw 'Shuttle not in state' if grid[k] isnt v
     grid[k] = 'nothing'
 
   {dx,dy} = s.states[to]
-  for {x,y,v} in s.points
+  for k,v of s.points
+    {x,y} = parseXY k
     k = "#{x+dx},#{y+dy}"
     grid[k] = v
 
