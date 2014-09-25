@@ -128,7 +128,15 @@ class Parser
       # We'll assume that any shuttles are either part of the current
       # shuttle, or they'll move out of the way before we get there.
       for {x,y} in s.points
-        if @get(x+dx, y+dy) not in ['nothing', 'shuttle', 'thinshuttle']
+        k = "#{x+dx},#{y+dy}"
+        # Check that we aren't overlapping with another shuttle. (Technically
+        # valid, but not allowed by this compiler)
+        otherSid = @shuttleGrid[k]
+        if otherSid? and otherSid != sid
+          console.warn 'Potentially overlapping shuttles'
+          return false
+
+        if @grid[k] not in ['nothing', 'shuttle', 'thinshuttle']
           return false
 
       # pushedBy is a list of {rid,mx,my} multipliers.
@@ -153,12 +161,6 @@ class Parser
       for {x,y} in s.points when @get(x, y) is 'shuttle'
         _x = x+dx; _y = y+dy
         k = "#{_x},#{_y}"
-
-        # Check that we aren't overlapping with another shuttle. (Technically
-        # valid, but not allowed by this compiler)
-        currentShuttle = @shuttleGrid[k]
-        if currentShuttle? and currentShuttle != sid
-          throw Error 'Potentially overlapping shuttles'
 
         @shuttleGrid[k] = sid
 
@@ -212,7 +214,7 @@ class Parser
 
       'statemachine'
 
-    #console.log "Shuttle #{id} has #{numStates} states"
+    #console.log "Shuttle #{sid} has #{s.states.length} states"
     #console.log s
 
   makeRegionFrom: (x, y, isTop) ->
