@@ -547,7 +547,7 @@ function calc#{rid}(z) {
     W()
 
 
-  do -> # Step function
+  do -> # calculate pressure of relevant regions
     W "function calcPressure() {"
     W.block ->
       W "base = extent;"
@@ -592,6 +592,8 @@ function calc#{rid}(z) {
           W()
     W "}"
     W()
+
+  do -> # update shuttles based on pressure
     W "function updateShuttles() {"
     W.block ->
       # Update the state of all shuttles

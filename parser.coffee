@@ -47,6 +47,8 @@ class Parser
     util.printPoint @extents, @grid, x, y
 
   parse: (@opts = {}) ->
+    @debug ||= @opts.debug
+
     # For now.
     @opts.expensiveOptimizations = true
 
@@ -78,7 +80,7 @@ class Parser
     # Figure out which engines (if any) are important in by multiple regions.
     @calculateEngineExclusivity e for e in @engines
 
-    if @opts.debug
+    if @debug
       printEdges @extents, @grid, @edgeGrid
 
 
@@ -224,9 +226,9 @@ class Parser
     rid = @edgeGrid[k]
     return @regions[rid] if rid isnt undefined
 
-    #console.log "making region at #{x}, #{y}, #{isTop}"
-
     rid = @regions.length
+    #console.log "making region #{rid} at #{x}, #{y}, #{isTop}"
+
     @regions.push r =
       engines: []
       connections: {}
@@ -276,15 +278,17 @@ class Parser
         sid = @shuttleGrid[k]
         v = @grid[k]
 
-        #console.log 'flood filling', id, x, y, f
+        #console.log 'flood filling', rid, x, y, f, v
         #@printPoint x, y
 
         if sid != undefined
-          #console.log 'adding temp edge', x, y, a, f
+          #console.log 'adding temp edge', x, y, sid, f
+          #@printPoint x, y
           #console.log '\n'
           # This is the boundary with a shuttle. Mark it - we'll come back in
           # the next pass.
           r.tempEdges.push {x,y,sid,f}
+
           continue
 
         @regionGrid[k] = rid if v in ['nothing', 'thinsolid', 'thinshuttle', 'bridge']
@@ -350,13 +354,14 @@ class Parser
         {x,y,sid,f} = e
         s = @shuttles[sid]
 
-        #console.log "temp edge at region #{rid} shuttle #{sid} (#{x},#{y}) force #{JSON.stringify f}"
-        #@printPoint x, y
+        if @debug
+          console.log "temp edge at region #{rid} shuttle #{sid} (#{x},#{y}) force #{JSON.stringify f}"
+          @printPoint x, y
 
         for state,stateid in s.states
           filledStates = s.fill["#{x},#{y}"]
           #console.log filledStates
-          #console.log "looking inside for state #{stateid}"
+          #if @debug then console.log "looking inside for state #{stateid}"
           push = (state.tempPushedBy[rid] ||= {mx:0,my:0})
 
           #console.log 's', stateid, filledStates
@@ -364,6 +369,7 @@ class Parser
             #@printPoint x, y
             
             # Record the force from the touch.
+            if @debug then console.log 'outside push', x, y, f
             push.mx += f.dx
             push.my += f.dy
           else
@@ -390,6 +396,8 @@ class Parser
               if adjList[stateid]?
                 return no
 
+              if @debug
+                console.log "claiming #{x},#{y} in adjacency list with region #{rid}"
               adjList[stateid] = rid
 
               # Look for connections to other regions. Also figure out if this
@@ -405,7 +413,7 @@ class Parser
                 # If this shuttle fills the adjacent state, add a force multiplier.
                 #console.log "#{x+fx},#{y+fy}", s.fill["#{x+fx},#{y+fy}"]
                 if s.fill["#{x+dx},#{y+dy}"]?[stateid]
-                  #console.log 'push', x, y, {dx, dy}
+                  if @debug then console.log 'inside push', x, y, {dx, dy}
                   push.mx += dx
                   push.my += dy
 
@@ -533,7 +541,6 @@ class Parser
         return e.exclusive
 
 
-
 parse = exports.parse = (grid, opts) ->
   parser = new Parser grid
   parser.parse opts
@@ -559,6 +566,12 @@ if require.main == module
     console.log "shuttle #{sid} (#{s.type}):"
     console.log 'pushedby', s.pushedBy
     console.log state for state in s.states
+
+  console.log()
+  for r,rid in regions
+    console.log "region #{rid}"
+    console.log r
+    console.log c for k,c of r.connections
 
   graphFile = filename.split('.')[0] + '.svg'
   util.drawRegionGraph data, graphFile
