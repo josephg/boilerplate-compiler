@@ -109,7 +109,7 @@ exports.printGrid = (extents, grid, stream = process.stdout) ->
 
 exports.printPoint = (extents, grid, px, py) ->
   get = (x, y) -> if x == px and y == py then '%' else grid[[x,y]]
-  printCustomGrid extents, get, px, py
+  printCustomGrid extents, get
 
 exports.printEdges = ({top, left, bottom, right}, grid, edgeGrid, stream = process.stdout) ->
   edgeChar = (x, y, isTop) ->
