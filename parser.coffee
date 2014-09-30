@@ -274,7 +274,6 @@ class Parser
       for {x,y,ox,oy,f}, i in check
         k = "#{x},#{y}"
         continue if visited[k]
-        visited[k] = true
         sid = @shuttleGrid[k]
         v = @grid[k]
 
@@ -290,6 +289,12 @@ class Parser
           r.tempEdges.push {x,y,sid,f}
 
           continue
+
+        # This is a bit of a hack putting this here. We're not going to mark
+        # the cell as visited unless its not a shuttle because its important
+        # that we visit shuttle cells from every direction (to calculate the
+        # force).
+        visited[k] = true
 
         @regionGrid[k] = rid if v in ['nothing', 'thinsolid', 'thinshuttle', 'bridge']
 
