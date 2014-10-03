@@ -456,7 +456,6 @@ class Parser
       for rid in e.regions
         fillRegions @regions, rid, (rid2, trace) =>
           r = @regions[rid2]
-          return no if !r.neutral
           r.neutral = false
           return yes
 
