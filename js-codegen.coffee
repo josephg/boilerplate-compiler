@@ -491,19 +491,18 @@ function addEngine(zone, engine, engineValue) {
         r.used = 'primaryOnly'
       else
         r.used = 'primary'
-      #console.log "fill #{rid} with #{r.used}"
+
+      #console.warn "fill #{rid} with #{r.used}"
 
       util.fillRegions regions, rid, (rid2, trace) ->
         r = regions[rid2]
 
         #console.log "inline #{rid2}" if r.inline
 
-        #console.log "fill via #{rid2}(#{r.used}) trace ", trace
+        #console.warn "fill via #{rid2}(#{r.used}) trace ", trace
         #console.log r.connections
 
-        return no if r.used is 'transitive'
-        return yes if r.used
-        r.used = 'transitive'
+        r.used ||= 'transitive'
         return yes
 
     # First find which regions are actually used.
