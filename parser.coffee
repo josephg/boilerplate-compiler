@@ -246,9 +246,9 @@ class Parser
 
     hmm = (x, y, isTop) =>
       k = "#{x},#{y},#{isTop}"
-      if @edgeGrid[k] is undefined
-        #console.log 'expanding', id, 'to', x, y, isTop
-        @edgeGrid[k] = rid
+      if visited[k] is undefined and @edgeGrid[k] is undefined
+        #console.log 'expanding', rid, 'to', x, y, isTop
+        visited[k] = @edgeGrid[k] = rid
         to_explore.push {x,y,isTop}
 
     hmm x, y, isTop
@@ -273,7 +273,6 @@ class Parser
 
       for {x,y,ox,oy,f}, i in check
         k = "#{x},#{y}"
-        continue if visited[k]
         sid = @shuttleGrid[k]
         v = @grid[k]
 
@@ -294,8 +293,10 @@ class Parser
         # the cell as visited unless its not a shuttle because its important
         # that we visit shuttle cells from every direction (to calculate the
         # force).
-        visited[k] = true
+        #visited[k] = true
 
+        # This is only advisory (for drawing pressure) - bridges are in 2
+        # regions, but we'll just mark one of them.
         @regionGrid[k] = rid if v in ['nothing', 'thinsolid', 'thinshuttle', 'bridge']
 
         #console.log 'v', x, y, v

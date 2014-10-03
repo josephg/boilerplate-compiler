@@ -32,7 +32,7 @@ describe 'compiler', ->
 
     for fillMode in ['shuttles', 'engines'] then do (fillMode) -> describe "fill mode #{fillMode}", ->
       #for filename in ['oscillator.json']
-      for filename in files when filename.match /\.json$/
+      for filename in files when filename.match /^[^_].*\.json$/ # Ignore files starting in _
         do (filename) -> it filename, ->
           cData = compile "testdata/#{filename}", fillMode
 
