@@ -63,6 +63,10 @@ class Parser
     # Figure out all the places shuttles can move to, filling a cloud in the shuttle grid.
     @findShuttleStates s,sid for s,sid in @shuttles when !s.immobile
 
+    #if @opts.debug
+    #  console.log 'Shuttle grid:'
+    #  printGrid @extents, @shuttleGrid
+
     # Find & fill all regions in the edge grid.
     @fillRegions()
 
@@ -161,16 +165,17 @@ class Parser
       s.initial = stateid if dx == 0 and dy == 0
 
       # Mark filled cells as impassable in this state.
-      for k,v of s.points when v is 'shuttle'
+      for k,v of s.points
         {x,y} = parseXY k
         _x = x+dx; _y = y+dy
         k = "#{_x},#{_y}"
 
         @shuttleGrid[k] = sid
 
-        # s.fill is a map from x,y to [<true/falsey>] for passability in each state
-        f = (s.fill[k] ?= [])
-        f[stateid] = true
+        if v is 'shuttle'
+          # s.fill is a map from x,y to [<true/falsey>] for passability in each state
+          f = (s.fill[k] ?= [])
+          f[stateid] = true
 
     # Figure out how we'll calculate the shuttle's successor states in the
     # generated code.

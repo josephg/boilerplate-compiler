@@ -536,6 +536,9 @@ function addEngine(zone, engine, engineValue) {
         else
           no
 
+    #for r,rid in regions
+    #  console.warn "#{rid}: used: #{r.used} inline: #{r.inline}"
+
     for r,rid in regions when r.used && !r.inline
       W """
 function calc#{rid}(z) {
@@ -667,5 +670,5 @@ if require.main == module
   filename = process.argv[2]
   throw 'Missing file argument' unless filename
   data = parseFile filename
-  gen data, process.stdout, module:'node'#, fillMode:'engines'
+  gen data, process.stdout, module:'node', fillMode:'engines'
 
