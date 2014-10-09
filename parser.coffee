@@ -408,7 +408,8 @@ class Parser
                 return no
 
               if @debug
-                console.log "claiming #{x},#{y} in adjacency list with region #{rid}"
+                console.log "claiming #{x},#{y} for state #{stateid} in adjacency list with region #{rid}"
+                @printPoint x, y
               adjList[stateid] = rid
 
               # Look for connections to other regions. Also figure out if this
@@ -432,11 +433,11 @@ class Parser
 
       delete r.tempEdges
 
-    ###
     if @opts.debug
       for s,sid in @shuttles
         console.log "shuttle #{sid}"
-        console.log s.adjacentTo
+        console.log 'adj', s.adjacentTo
+    ###
         for state,stateid in s.states
           util.moveShuttle @grid, @shuttles, sid, s.initial, stateid
           console.log "state #{stateid}"
