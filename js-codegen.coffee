@@ -420,12 +420,21 @@ var regionZone = new Uint32Array(#{regions.length});
 var base = 1, extent = 1;
 
 var zonePressure = new #{intArray engines.length}(#{regions.length});
+"""
+
+    if opts.extraFns then W """
+function getZone(rid) {
+  return regionZone[rid] - base;
+}
 
 function getPressure(rid) {
   var z = regionZone[rid];
   return z < base ? 0 : zonePressure[z-base];
 }
 
+"""
+
+    W """
 function step() {
   calcPressure();
   updateShuttles();
@@ -485,7 +494,7 @@ function addEngine(zone, engine, engineValue) {
 
     fillFromRegion = (rid) ->
       r = regions[rid]
-      return if r.neutral
+      return if r.neutral and opts.fillMode != 'all'
 
       if !r.used
         r.used = 'primaryOnly'
@@ -523,6 +532,10 @@ function addEngine(zone, engine, engineValue) {
         # (And everything else can be inferred to have 0 pressure).
         for e in engines
           fillFromRegion rid for rid in e.regions
+
+      else
+        throw Error "Invalid fillMode #{opts.fillMode}"
+
 
     for r in regions
       numConnections = util.numKeys r.connections
@@ -654,7 +667,9 @@ function calc#{rid}(z) {
     W "return {"
 
   #("#{f}:#{f}" for f in ['
-  W "  states:shuttleState, step:step, getPressure:getPressure, calcPressure:calcPressure, updateShuttles:updateShuttles"
+  if opts.extraFns
+    W "getPressure:getPressure, getZone: getZone, "
+  W "  states:shuttleState, step:step, calcPressure:calcPressure, updateShuttles:updateShuttles"
   W "};"
   W()
 
