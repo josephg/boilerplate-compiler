@@ -1,6 +1,6 @@
 {
   "name": "boilerplate-compiler",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Boilerplate compiler",
   "main": "index.js",
   "dependencies": {
