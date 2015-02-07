@@ -6,6 +6,7 @@ dirs =
   down: {dx:0,dy:1}
   left: {dx:-1,dy:0}
 
+# left, up, right, down
 edges = [
   {ex:0,ey:0,isTop:false,dx:-1,dy:0}
   {ex:0,ey:0,isTop:true,dx:0,dy:-1}

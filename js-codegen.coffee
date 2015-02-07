@@ -340,6 +340,8 @@ emitForceExpr = (W, parserData, opts, sid, s, d) ->
     if emittedOne
       W "0;"
       W.indentation--
+    else if !isAlreadySet
+      W "force = 0;"
 
     W "switch(state) {"
     W.block ->
